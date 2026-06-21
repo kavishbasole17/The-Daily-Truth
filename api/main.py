@@ -131,6 +131,7 @@ async def health() -> HealthResponse:
         models_loaded=registry.total_loaded,
         classical_loaded=registry.classical_count,
         dl_loaded=registry.dl_count,
+        hybrid_loaded=registry.hybrid_count,
     )
 
 
@@ -142,10 +143,12 @@ async def list_models() -> ModelsListResponse:
     models = registry.list_models()
     classical = [m for m in models if m['category'] == 'Classical ML']
     dl        = [m for m in models if m['category'] == 'Deep Learning']
+    hybrid    = [m for m in models if m['category'] == 'Hybrid']
     return ModelsListResponse(
         total=len(models),
         classical_count=len(classical),
         dl_count=len(dl),
+        hybrid_count=len(hybrid),
         models=[ModelInfo(**m) for m in models],
     )
 

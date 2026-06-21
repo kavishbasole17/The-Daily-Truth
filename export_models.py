@@ -17,8 +17,9 @@ BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR    = os.path.join(BASE_DIR, 'models')
 CLASSICAL_DIR = os.path.join(MODELS_DIR, 'classical')
 DL_DIR        = os.path.join(MODELS_DIR, 'deep_learning')
+HYBRID_DIR    = os.path.join(MODELS_DIR, 'hybrid')
 
-for d in [CLASSICAL_DIR, DL_DIR]:
+for d in [CLASSICAL_DIR, DL_DIR, HYBRID_DIR]:
     os.makedirs(d, exist_ok=True)
 
 sys.path.insert(0, BASE_DIR)
@@ -409,6 +410,170 @@ def train_and_save_dl(X_train, X_test, y_train, y_test):
     return registry
 
 
+# ── Hybrid Stacking ───────────────────────────────────────────────────────────
+
+def _get_prob_export(model, X):
+    """Same probability extraction used in model_loader at inference time."""
+    if hasattr(model, 'predict_proba'):
+        return model.predict_proba(X)[:, 1]
+    elif hasattr(model, 'decision_function'):
+        s = model.decision_function(X)
+        s = s if s.ndim == 1 else s[:, 1]
+        return (s - s.min()) / (s.max() - s.min() + 1e-10)
+    return model.predict(X).astype(float)
+
+
+def train_and_save_hybrid(X_train, X_test, y_train, y_test):
+    print('\n' + '='*60)
+    print('  HYBRID STACKING — Training & Saving')
+    print('='*60)
+
+    from sklearn.linear_model import LogisticRegression
+
+    # ── Load base models from disk ────────────────────────────────
+    print('\n  Loading saved base models...')
+
+    tfidf = joblib.load(os.path.join(CLASSICAL_DIR, 'tfidf.joblib'))
+    dense = joblib.load(os.path.join(CLASSICAL_DIR, 'dense_pipeline.joblib'))
+
+    # (name, feature_type)
+    classical_specs = [
+        ('logistic_regression', 'tfidf'), ('multinomial_nb',   'tfidf'),
+        ('bernoulli_nb',        'tfidf'), ('complement_nb',    'tfidf'),
+        ('linear_svm',          'tfidf'), ('decision_tree',    'tfidf'),
+        ('random_forest',       'tfidf'), ('extra_trees',      'tfidf'),
+        ('adaboost',            'tfidf'), ('ridge_classifier', 'tfidf'),
+        ('sgd_classifier',      'tfidf'), ('passive_aggressive','tfidf'),
+        ('perceptron',          'tfidf'), ('mlp_classifier',   'tfidf'),
+        ('knn',                 'tfidf'), ('gradient_boosting','dense'),
+        ('lightgbm',            'tfidf'), ('catboost',         'dense'),
+    ]
+
+    classical_models = []
+    for name, feat in classical_specs:
+        path = os.path.join(CLASSICAL_DIR, f'{name}.joblib')
+        if os.path.exists(path):
+            classical_models.append((name, feat, joblib.load(path)))
+            print(f'    Loaded classical: {name}')
+        else:
+            print(f'    Skipping (not found): {name}')
+
+    dl_models = []
+    try:
+        import tensorflow as tf
+        from tensorflow.keras.preprocessing.text import tokenizer_from_json
+        from tensorflow.keras.preprocessing.sequence import pad_sequences
+        import json as _json
+
+        tok_path = os.path.join(DL_DIR, 'tokenizer.json')
+        cfg_path = os.path.join(DL_DIR, 'config.json')
+        with open(tok_path) as f:
+            tokenizer = tokenizer_from_json(f.read())
+        with open(cfg_path) as f:
+            dl_config = _json.load(f)
+        max_len = dl_config.get('max_len', 200)
+
+        for dl_name in ['lstm', 'gru', 'cnn', 'cnn_lstm']:
+            p = os.path.join(DL_DIR, f'{dl_name}.keras')
+            if os.path.exists(p):
+                dl_models.append((dl_name, tf.keras.models.load_model(p)))
+                print(f'    Loaded DL: {dl_name}')
+    except ImportError:
+        print('    TensorFlow not available — DL models excluded from stacking')
+        tokenizer = None
+        max_len = 200
+
+    if not classical_models and not dl_models:
+        print('  No base models found — run full export first.')
+        return {}
+
+    # ── Build meta-feature matrices ───────────────────────────────
+    print(f'\n  Generating meta-features from {len(classical_models)} classical '
+          f'+ {len(dl_models)} DL models...')
+
+    # Hold out 20% of training data as meta-training set so the meta-learner
+    # trains on examples it has never predicted labels for directly.
+    np.random.seed(42)
+    meta_idx = np.random.choice(len(X_train),
+                                size=int(0.20 * len(X_train)),
+                                replace=False)
+    X_meta = X_train[meta_idx]
+    y_meta = y_train[meta_idx]
+
+    # Pre-transform to avoid repeated vectorization
+    X_meta_tfidf = tfidf.transform(X_meta)
+    X_test_tfidf = tfidf.transform(X_test)
+
+    X_meta_dense = dense['svd'].transform(dense['tfidf'].transform(X_meta))
+    X_test_dense = dense['svd'].transform(dense['tfidf'].transform(X_test))
+
+    if dl_models and tokenizer is not None:
+        X_meta_seq = pad_sequences(
+            tokenizer.texts_to_sequences(X_meta),
+            maxlen=max_len, padding='post', truncating='post')
+        X_test_seq = pad_sequences(
+            tokenizer.texts_to_sequences(X_test),
+            maxlen=max_len, padding='post', truncating='post')
+    else:
+        X_meta_seq = X_test_seq = None
+
+    base_model_names = []
+    meta_train_cols, meta_test_cols = [], []
+
+    for name, feat, model in classical_models:
+        Xm = X_meta_tfidf if feat == 'tfidf' else X_meta_dense
+        Xt = X_test_tfidf  if feat == 'tfidf' else X_test_dense
+        meta_train_cols.append(_get_prob_export(model, Xm))
+        meta_test_cols.append(_get_prob_export(model, Xt))
+        base_model_names.append(name)
+
+    if dl_models and X_meta_seq is not None:
+        for dl_name, dl_model in dl_models:
+            meta_train_cols.append(
+                dl_model.predict(X_meta_seq, verbose=0).flatten())
+            meta_test_cols.append(
+                dl_model.predict(X_test_seq, verbose=0).flatten())
+            base_model_names.append(dl_name)
+
+    X_meta_stack = np.column_stack(meta_train_cols)
+    X_test_stack = np.column_stack(meta_test_cols)
+    print(f'  Meta-feature matrix: train={X_meta_stack.shape}  test={X_test_stack.shape}')
+
+    # ── Train meta-learner ────────────────────────────────────────
+    print('\n  Training Logistic Regression meta-learner...')
+    t0 = time.time()
+    meta_lr = LogisticRegression(C=1.0, max_iter=1000, random_state=42)
+    meta_lr.fit(X_meta_stack, y_meta)
+    elapsed = round(time.time() - t0, 2)
+
+    # ── Evaluate on test set ─────────────────────────────────────
+    m = compute_metrics(meta_lr, X_test_stack, y_test)
+    auc_str = f'{m["auc"]:.4f}' if m["auc"] is not None else 'N/A'
+    print(f'  Acc={m["accuracy"]:.4f}  F1={m["f1"]:.4f}  '
+          f'AUC={auc_str}  Time={elapsed}s')
+
+    # ── Save ──────────────────────────────────────────────────────
+    payload = {
+        'meta_learner':     meta_lr,
+        'base_model_names': base_model_names,
+        'n_features':       len(base_model_names),
+    }
+    out_path = os.path.join(HYBRID_DIR, 'stacking_lr.joblib')
+    joblib.dump(payload, out_path)
+    print(f'  Saved → {out_path}')
+
+    return {
+        'hybrid_stacking': {
+            'display_name': 'Hybrid Stacking (LR)',
+            'category':     'Hybrid',
+            'feature_type': 'hybrid',
+            'path':         os.path.relpath(out_path, BASE_DIR),
+            'train_time':   elapsed,
+            'metrics':      m,
+        }
+    }
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -417,6 +582,8 @@ def main():
                         help='Skip deep learning models (faster)')
     parser.add_argument('--skip-classical', action='store_true',
                         help='Skip classical ML models')
+    parser.add_argument('--skip-hybrid', action='store_true',
+                        help='Skip hybrid stacking model')
     args = parser.parse_args()
 
     print('\n' + '='*60)
@@ -434,6 +601,10 @@ def main():
     if not args.skip_dl:
         dl_registry = train_and_save_dl(X_train, X_test, y_train, y_test)
         registry.update(dl_registry)
+
+    if not args.skip_hybrid:
+        hybrid_registry = train_and_save_hybrid(X_train, X_test, y_train, y_test)
+        registry.update(hybrid_registry)
 
     # Save combined registry
     registry_path = os.path.join(MODELS_DIR, 'registry.json')

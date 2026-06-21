@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 BASE_DIR        = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODELS_DIR      = os.path.join(BASE_DIR, 'models')
+HYBRID_DIR      = os.path.join(MODELS_DIR, 'hybrid')
 MAX_TEXT_LENGTH = 50_000
 
 
@@ -57,6 +58,8 @@ class ModelRegistry:
         self.tokenizer = None
         self.dl_config: dict = {}
         self._tf_available = False
+        self.hybrid_meta_learner = None
+        self.hybrid_base_names: list[str] = []
 
     # ── Loading ───────────────────────────────────────────────────
 
@@ -73,11 +76,13 @@ class ModelRegistry:
 
         self._load_classical()
         self._load_dl()
+        self._load_hybrid()
 
-        total = len(self.classical) + len(self.dl_models)
+        total = len(self.classical) + len(self.dl_models) + (1 if self.hybrid_meta_learner else 0)
         logger.info(
             f'ModelRegistry ready: {len(self.classical)} classical + '
-            f'{len(self.dl_models)} DL = {total} models loaded.'
+            f'{len(self.dl_models)} DL + '
+            f'{1 if self.hybrid_meta_learner else 0} hybrid = {total} models loaded.'
         )
 
     def _load_classical(self) -> None:
@@ -139,6 +144,20 @@ class ModelRegistry:
             except Exception as e:
                 logger.error(f'Failed to load DL model {name}: {e}')
 
+    def _load_hybrid(self) -> None:
+        path = os.path.join(HYBRID_DIR, 'stacking_lr.joblib')
+        if not os.path.exists(path):
+            logger.info('No hybrid model found — skipping.')
+            return
+        try:
+            payload = joblib.load(path)
+            self.hybrid_meta_learner = payload['meta_learner']
+            self.hybrid_base_names   = payload['base_model_names']
+            logger.info(f'Hybrid stacking model loaded '
+                        f'({len(self.hybrid_base_names)} base models).')
+        except Exception as e:
+            logger.error(f'Failed to load hybrid model: {e}')
+
     # ── Prediction helpers ────────────────────────────────────────
 
     def _get_prob(self, model, X) -> np.ndarray:
@@ -193,6 +212,8 @@ class ModelRegistry:
                                            info['feature_type'], threshold)
         elif info['category'] == 'Deep Learning':
             return self._predict_dl(cleaned, model_name, threshold)
+        elif info['category'] == 'Hybrid':
+            return self._predict_hybrid(cleaned, model_name, threshold)
         else:
             raise ValueError(f"Unknown category: {info['category']}")
 
@@ -233,6 +254,34 @@ class ModelRegistry:
         prob_real = float(self.dl_models[name].predict(X, verbose=0).flatten()[0])
         return self._build_result(name, prob_real, threshold)
 
+    def _predict_hybrid(self, cleaned_text: str, name: str,
+                        threshold: float) -> dict:
+        if self.hybrid_meta_learner is None:
+            raise ValueError('Hybrid model not loaded.')
+        if self.tfidf is None:
+            raise ValueError('TF-IDF not loaded — needed for hybrid prediction.')
+
+        # Collect base model probabilities in the exact order recorded at training time
+        probs = []
+        for base_name in self.hybrid_base_names:
+            if base_name not in self.registry:
+                probs.append(0.5)
+                continue
+            info = self.registry[base_name]
+            try:
+                if info['category'] == 'Classical ML':
+                    r = self._predict_classical(cleaned_text, base_name,
+                                                info['feature_type'], threshold)
+                else:
+                    r = self._predict_dl(cleaned_text, base_name, threshold)
+                probs.append(r['prob_real'])
+            except Exception:
+                probs.append(0.5)
+
+        X_stack = np.array(probs).reshape(1, -1)
+        prob_real = float(self.hybrid_meta_learner.predict_proba(X_stack)[0, 1])
+        return self._build_result(name, prob_real, threshold)
+
     def predict_all(self, text: str, threshold: float = 0.5) -> list[dict]:
         """Run prediction across every loaded model."""
         cleaned = clean_text(text)
@@ -251,6 +300,14 @@ class ModelRegistry:
             if info['category'] == 'Deep Learning' and name in self.dl_models:
                 try:
                     r = self._predict_dl(cleaned, name, threshold)
+                    results.append(r)
+                except Exception as e:
+                    logger.warning(f'Skipping {name}: {e}')
+        # hybrid
+        for name, info in self.registry.items():
+            if info['category'] == 'Hybrid' and self.hybrid_meta_learner is not None:
+                try:
+                    r = self._predict_hybrid(cleaned, name, threshold)
                     results.append(r)
                 except Exception as e:
                     logger.warning(f'Skipping {name}: {e}')
@@ -297,7 +354,11 @@ class ModelRegistry:
     def list_models(self) -> list[dict]:
         out = []
         for name, info in self.registry.items():
-            loaded = (name in self.classical) or (name in self.dl_models)
+            loaded = (
+                (name in self.classical) or
+                (name in self.dl_models) or
+                (info.get('category') == 'Hybrid' and self.hybrid_meta_learner is not None)
+            )
             out.append({
                 'name':         name,
                 'display_name': info.get('display_name', name),
@@ -317,5 +378,9 @@ class ModelRegistry:
         return len(self.dl_models)
 
     @property
+    def hybrid_count(self) -> int:
+        return 1 if self.hybrid_meta_learner is not None else 0
+
+    @property
     def total_loaded(self) -> int:
-        return self.classical_count + self.dl_count
+        return self.classical_count + self.dl_count + self.hybrid_count

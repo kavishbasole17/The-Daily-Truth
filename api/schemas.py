@@ -71,6 +71,7 @@ class ModelsListResponse(BaseModel):
     total: int
     classical_count: int
     dl_count: int
+    hybrid_count: int
     models: list[ModelInfo]
 
 
@@ -81,6 +82,7 @@ class HealthResponse(BaseModel):
     models_loaded: int
     classical_loaded: int
     dl_loaded: int
+    hybrid_loaded: int
 
 
 # ── Results / benchmark ────────────────────────────────────────────────────────

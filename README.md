@@ -77,6 +77,14 @@ capstone-final/
 
 All classical models use TF-IDF vectorization (`models/classical/tfidf.joblib`).
 
+### Hybrid (1 model)
+
+| Model | File |
+|---|---|
+| Hybrid Stacking (LR) | `models/hybrid/stacking_lr.joblib` |
+
+A two-layer stacking ensemble. All 22 base model probability outputs are concatenated into a 22-feature vector, which is fed into a Logistic Regression meta-learner. The meta-learner learns which base models to trust and combines them optimally.
+
 ### Deep Learning (4 models)
 
 | Model | File |
@@ -89,6 +97,8 @@ All classical models use TF-IDF vectorization (`models/classical/tfidf.joblib`).
 Deep learning models use a shared Keras tokenizer (`models/deep_learning/tokenizer.json`).
 
 > Model files are stored with **Git LFS**. Run `git lfs pull` after cloning.
+
+> The hybrid model (`stacking_lr.joblib`) is generated **after** all 22 base models are trained. Run `python export_models.py` (or notebook `24_hybrid_stacking.ipynb`) once base models exist.
 
 ---
 
@@ -153,6 +163,7 @@ Run notebooks in order for a full walkthrough:
 - `01` – `17` — One notebook per classical ML model
 - `18`, `20`, `21`, `22` — LSTM, GRU, CNN, CNN-LSTM
 - `23_comparison_all_models.ipynb` — Cross-model comparison charts
+- `24_hybrid_stacking.ipynb` — Hybrid stacking ensemble (runs after base models are saved)
 
 ---
 
