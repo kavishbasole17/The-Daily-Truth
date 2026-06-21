@@ -1,0 +1,302 @@
+{
+  "logistic_regression": {
+    "display_name": "Logistic Regression",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\logistic_regression.joblib",
+    "train_time": 3.64,
+    "metrics": {
+      "accuracy": 0.8287012676393207,
+      "f1": 0.8266640741824001,
+      "precision": 0.8287414776004915,
+      "recall": 0.8287012676393207,
+      "auc": 0.9182533452204449
+    }
+  },
+  "multinomial_nb": {
+    "display_name": "Multinomial Naive Bayes",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\multinomial_nb.joblib",
+    "train_time": 0.08,
+    "metrics": {
+      "accuracy": 0.7724467830662521,
+      "f1": 0.7732891619147325,
+      "precision": 0.7749061721517385,
+      "recall": 0.7724467830662521,
+      "auc": 0.8707444097099195
+    }
+  },
+  "bernoulli_nb": {
+    "display_name": "Bernoulli Naive Bayes",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\bernoulli_nb.joblib",
+    "train_time": 0.17,
+    "metrics": {
+      "accuracy": 0.7304950968667783,
+      "f1": 0.7202924882952253,
+      "precision": 0.7315045906837733,
+      "recall": 0.7304950968667783,
+      "auc": 0.7245113825761818
+    }
+  },
+  "complement_nb": {
+    "display_name": "Complement Naive Bayes",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\complement_nb.joblib",
+    "train_time": 0.07,
+    "metrics": {
+      "accuracy": 0.7578091365701985,
+      "f1": 0.7598672537561724,
+      "precision": 0.775530993835965,
+      "recall": 0.7578091365701985,
+      "auc": 0.8697077828790205
+    }
+  },
+  "linear_svm": {
+    "display_name": "Linear SVM",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\linear_svm.joblib",
+    "train_time": 4.62,
+    "metrics": {
+      "accuracy": 0.8242047357091605,
+      "f1": 0.8232239951335695,
+      "precision": 0.8233538071291979,
+      "recall": 0.8242047357091605,
+      "auc": 0.9107523910345898
+    }
+  },
+  "decision_tree": {
+    "display_name": "Decision Tree",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\decision_tree.joblib",
+    "train_time": 159.02,
+    "metrics": {
+      "accuracy": 0.8171729251375269,
+      "f1": 0.8144461683503227,
+      "precision": 0.8175871801757175,
+      "recall": 0.8171729251375269,
+      "auc": 0.8177816763653931
+    }
+  },
+  "random_forest": {
+    "display_name": "Random Forest",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\random_forest.joblib",
+    "train_time": 81.55,
+    "metrics": {
+      "accuracy": 0.8335326476919397,
+      "f1": 0.8298619357509697,
+      "precision": 0.8373757600208523,
+      "recall": 0.8335326476919397,
+      "auc": 0.9108690947944855
+    }
+  },
+  "extra_trees": {
+    "display_name": "Extra Trees",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\extra_trees.joblib",
+    "train_time": 114.85,
+    "metrics": {
+      "accuracy": 0.8349198756278402,
+      "f1": 0.8317926493301208,
+      "precision": 0.8374929977673534,
+      "recall": 0.8349198756278402,
+      "auc": 0.9091623023060095
+    }
+  },
+  "adaboost": {
+    "display_name": "AdaBoost",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\adaboost.joblib",
+    "train_time": 288.25,
+    "metrics": {
+      "accuracy": 0.775843099736905,
+      "f1": 0.7658126103595735,
+      "precision": 0.7854701087295809,
+      "recall": 0.775843099736905,
+      "auc": 0.851383094907173
+    }
+  },
+  "ridge_classifier": {
+    "display_name": "Ridge Classifier",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\ridge_classifier.joblib",
+    "train_time": 2.47,
+    "metrics": {
+      "accuracy": 0.8306146854819422,
+      "f1": 0.828998752231081,
+      "precision": 0.8302326720561016,
+      "recall": 0.8306146854819422,
+      "auc": 0.912956008100908
+    }
+  },
+  "sgd_classifier": {
+    "display_name": "SGD Classifier",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\sgd_classifier.joblib",
+    "train_time": 0.79,
+    "metrics": {
+      "accuracy": 0.8313800526189906,
+      "f1": 0.829447488964724,
+      "precision": 0.8313986937242369,
+      "recall": 0.8313800526189906,
+      "auc": 0.9182208538327468
+    }
+  },
+  "passive_aggressive": {
+    "display_name": "Passive Aggressive",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\passive_aggressive.joblib",
+    "train_time": 3.5,
+    "metrics": {
+      "accuracy": 0.7884238220521407,
+      "f1": 0.7884334313143153,
+      "precision": 0.7884431321714687,
+      "recall": 0.7884238220521407,
+      "auc": 0.8757773161916729
+    }
+  },
+  "perceptron": {
+    "display_name": "Perceptron",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\perceptron.joblib",
+    "train_time": 0.92,
+    "metrics": {
+      "accuracy": 0.7907677589093518,
+      "f1": 0.7908393162239624,
+      "precision": 0.7909161771041219,
+      "recall": 0.7907677589093518,
+      "auc": 0.878005827534047
+    }
+  },
+  "mlp_classifier": {
+    "display_name": "MLP Classifier",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\mlp_classifier.joblib",
+    "train_time": 1329.3,
+    "metrics": {
+      "accuracy": 0.8324802678784979,
+      "f1": 0.8297480975407571,
+      "precision": 0.8339442097370092,
+      "recall": 0.8324802678784979,
+      "auc": 0.9271026541049467
+    }
+  },
+  "knn": {
+    "display_name": "KNN",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\knn.joblib",
+    "train_time": 0.02,
+    "metrics": {
+      "accuracy": 0.7504424778761062,
+      "f1": 0.7466305456957608,
+      "precision": 0.7483309379826645,
+      "recall": 0.7504424778761062,
+      "auc": 0.8245901898213178
+    }
+  },
+  "gradient_boosting": {
+    "display_name": "Gradient Boosting",
+    "category": "Classical ML",
+    "feature_type": "dense",
+    "path": "models\\classical\\gradient_boosting.joblib",
+    "train_time": 125.35,
+    "metrics": {
+      "accuracy": 0.7782348720401818,
+      "f1": 0.7720193741467752,
+      "precision": 0.7806622688896583,
+      "recall": 0.7782348720401818,
+      "auc": 0.8630393802439252
+    }
+  },
+  "lightgbm": {
+    "display_name": "LightGBM",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models\\classical\\lightgbm.joblib",
+    "train_time": 79.98,
+    "metrics": {
+      "accuracy": 0.8531930160248744,
+      "f1": 0.8501265027252602,
+      "precision": 0.8576280364126976,
+      "recall": 0.8531930160248744,
+      "auc": 0.9381801333143425
+    }
+  },
+  "catboost": {
+    "display_name": "CatBoost",
+    "category": "Classical ML",
+    "feature_type": "dense",
+    "path": "models\\classical\\catboost.joblib",
+    "train_time": 2.39,
+    "metrics": {
+      "accuracy": 0.7900980626644344,
+      "f1": 0.7872002032091613,
+      "precision": 0.789276805192393,
+      "recall": 0.7900980626644344,
+      "auc": 0.8752739033455671
+    }
+  },
+  "lstm": {
+    "display_name": "LSTM",
+    "category": "Deep Learning",
+    "feature_type": "sequence",
+    "path": "models\\deep_learning\\lstm.keras",
+    "train_time": 2125.4,
+    "metrics": {
+      "accuracy": 0.8088973929681894,
+      "f1": 0.8054193221545429,
+      "auc": 0.9028224889585169
+    }
+  },
+  "gru": {
+    "display_name": "GRU",
+    "category": "Deep Learning",
+    "feature_type": "sequence",
+    "path": "models\\deep_learning\\gru.keras",
+    "train_time": 764.14,
+    "metrics": {
+      "accuracy": 0.8180817986127721,
+      "f1": 0.8135543012156274,
+      "auc": 0.9172424462638862
+    }
+  },
+  "cnn": {
+    "display_name": "CNN",
+    "category": "Deep Learning",
+    "feature_type": "sequence",
+    "path": "models\\deep_learning\\cnn.keras",
+    "train_time": 94.01,
+    "metrics": {
+      "accuracy": 0.8231523558957188,
+      "f1": 0.8236622823238381,
+      "auc": 0.9198909395785607
+    }
+  },
+  "cnn_lstm": {
+    "display_name": "CNN + LSTM",
+    "category": "Deep Learning",
+    "feature_type": "sequence",
+    "path": "models\\deep_learning\\cnn_lstm.keras",
+    "train_time": 153.27,
+    "metrics": {
+      "accuracy": 0.8299449892370246,
+      "f1": 0.828154449608541,
+      "auc": 0.922750309577563
+    }
+  }
+}
