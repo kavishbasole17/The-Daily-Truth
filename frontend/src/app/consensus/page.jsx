@@ -30,12 +30,14 @@ export default function ConsensusPage() {
             setResult(null);
 
             const { data } = await consensusPredict({
-                article
+                text: article,
+                threshold: 0.5,
             });
 
             setResult(data);
         } catch (err) {
             setError(
+                err?.response?.data?.detail ||
                 err?.response?.data?.message ||
                 "Failed to analyze article."
             );
@@ -44,23 +46,9 @@ export default function ConsensusPage() {
         }
     };
 
-    const verdict =
-        result?.consensus ||
-        result?.prediction ||
-        result?.verdict ||
-        "";
-
-    const agreement =
-        result?.agreement ||
-        result?.agreement_percentage ||
-        result?.consensus_score ||
-        0;
-
-    const models =
-        result?.models ||
-        result?.results ||
-        result?.predictions ||
-        [];
+    const verdict = result?.consensus || "";
+    const agreement = Math.round((result?.consensus_confidence ?? 0) * 100);
+    const models = result?.results || [];
 
     return (
         <>
@@ -104,49 +92,36 @@ export default function ConsensusPage() {
                     {result && (
                         <>
                             <div className="consensus-banner glass">
-                                <h2>{verdict}</h2>
+                                <h2>{verdict.toUpperCase()}</h2>
                                 <p>{agreement}% Agreement</p>
                             </div>
 
                             <div className="consensus-grid">
-                                {models.map((model, i) => (
+                                {models.map((m, i) => (
                                     <details
                                         key={i}
                                         className="model-card glass"
                                     >
                                         <summary>
-                                            {model.name ||
-                                                model.model ||
-                                                `Model ${i + 1}`}
+                                            {m.display_name || m.model_name || `Model ${i + 1}`}
                                         </summary>
 
                                         <div className="model-content">
                                             <div>
-                                                Prediction:
-                                                {" "}
-                                                {model.prediction ||
-                                                    model.label ||
-                                                    model.verdict}
+                                                Prediction:{" "}
+                                                <strong>{m.label}</strong>
                                             </div>
 
                                             <div>
-                                                Confidence:
-                                                {" "}
-                                                {Math.round(
-                                                    model.confidence ||
-                                                    model.score ||
-                                                    model.probability ||
-                                                    0
-                                                )}
-                                                %
+                                                Confidence:{" "}
+                                                <strong>
+                                                    {Math.round((m.confidence ?? 0) * 100)}%
+                                                </strong>
                                             </div>
 
                                             <div>
-                                                Time:
-                                                {" "}
-                                                {model.inference_time ||
-                                                    model.time ||
-                                                    "N/A"}
+                                                Category:{" "}
+                                                {m.category || "N/A"}
                                             </div>
                                         </div>
                                     </details>

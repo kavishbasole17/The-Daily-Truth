@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 import Navbar from "@/components/Navbar";
 import LoadingOverlay from "@/components/LoadingOverlay";
@@ -15,27 +15,34 @@ import ErrorState from "@/components/ErrorState";
 import EmptyState from "@/components/EmptyState";
 import Footer from "@/components/Footer";
 
-import { predictArticle } from "@/services/api";
+import { predictArticle, getModels } from "@/services/api";
 
 import "@/styles/pages.css";
 
 export default function SinglePredictionPage() {
     const [article, setArticle] = useState("");
-    const [model, setModel] = useState("distilbert");
+    const [model, setModel] = useState("");
+    const [availableModels, setAvailableModels] = useState([]);
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
     const [error, setError] = useState("");
 
-    const models = [
-        "distilbert",
-        "bert",
-        "roberta",
-        "deberta",
-        "xlnet"
-    ];
+    useEffect(() => {
+        getModels()
+            .then(({ data }) => {
+                const list = (data.models || [])
+                    .filter(m => m.loaded)
+                    .map(m => m.name);
+                setAvailableModels(list);
+                if (list.length > 0) setModel(list[0]);
+            })
+            .catch(() => {
+                // fallback — user will see error when they submit
+            });
+    }, []);
 
     const handleSubmit = async () => {
-        if (!article.trim()) return;
+        if (!article.trim() || !model) return;
 
         try {
             setLoading(true);
@@ -43,13 +50,15 @@ export default function SinglePredictionPage() {
             setResult(null);
 
             const { data } = await predictArticle({
-                article,
-                model
+                text: article,
+                model_name: model,
+                threshold: 0.5,
             });
 
-            setResult(data);
+            setResult(data.result);
         } catch (err) {
             setError(
+                err?.response?.data?.detail ||
                 err?.response?.data?.message ||
                 "Failed to analyze article."
             );
@@ -58,30 +67,10 @@ export default function SinglePredictionPage() {
         }
     };
 
-    const prediction =
-        result?.prediction ||
-        result?.label ||
-        result?.verdict ||
-        "";
-
-    const confidence = Math.round(
-        result?.confidence ||
-        result?.score ||
-        result?.probability ||
-        0
-    );
-
-    const realProbability = Math.round(
-        result?.real_probability ||
-        result?.real ||
-        0
-    );
-
-    const fakeProbability = Math.round(
-        result?.fake_probability ||
-        result?.fake ||
-        0
-    );
+    const prediction = result?.label || "";
+    const confidence = Math.round((result?.confidence ?? 0) * 100);
+    const realProbability = Math.round((result?.prob_real ?? 0) * 100);
+    const fakeProbability = Math.round((result?.prob_fake ?? 0) * 100);
 
     return (
         <>
@@ -105,11 +94,13 @@ export default function SinglePredictionPage() {
             />
 
                         <div className="prediction-controls">
-                            <ModelSelector
-                                models={models}
-                                value={model}
-                                onChange={setModel}
-                            />
+                            {availableModels.length > 0 && (
+                                <ModelSelector
+                                    models={availableModels}
+                                    value={model}
+                                    onChange={setModel}
+                                />
+                            )}
 
                             <NewspaperButton onClick={handleSubmit}>
                                 VERIFY ARTICLE

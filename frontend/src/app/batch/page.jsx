@@ -2,24 +2,39 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 import Navbar from "@/components/Navbar";
 import LoadingOverlay from "@/components/LoadingOverlay";
+import ModelSelector from "@/components/ModelSelector";
 import NewspaperButton from "@/components/NewspaperButton";
 import ErrorState from "@/components/ErrorState";
 import EmptyState from "@/components/EmptyState";
 import Footer from "@/components/Footer";
 
-import { batchPredict } from "@/services/api";
+import { batchPredict, getModels } from "@/services/api";
 
 import "@/styles/pages.css";
 
 export default function BatchPage() {
     const [articles, setArticles] = useState("");
+    const [model, setModel] = useState("");
+    const [availableModels, setAvailableModels] = useState([]);
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState([]);
     const [error, setError] = useState("");
+
+    useEffect(() => {
+        getModels()
+            .then(({ data }) => {
+                const list = (data.models || [])
+                    .filter(m => m.loaded)
+                    .map(m => m.name);
+                setAvailableModels(list);
+                if (list.length > 0) setModel(list[0]);
+            })
+            .catch(() => {});
+    }, []);
 
     const handleSubmit = async () => {
         const lines = articles
@@ -27,7 +42,7 @@ export default function BatchPage() {
             .map(x => x.trim())
             .filter(Boolean);
 
-        if (!lines.length) return;
+        if (!lines.length || !model) return;
 
         if (lines.length > 100) {
             setError("Maximum 100 articles allowed.");
@@ -40,18 +55,15 @@ export default function BatchPage() {
             setResult([]);
 
             const { data } = await batchPredict({
-                articles: lines
+                texts: lines,
+                model_name: model,
+                threshold: 0.5,
             });
 
-            setResult(
-                data.results ||
-                data.predictions ||
-                data.data ||
-                data ||
-                []
-            );
+            setResult(data.results || []);
         } catch (err) {
             setError(
+                err?.response?.data?.detail ||
                 err?.response?.data?.message ||
                 "Batch analysis failed."
             );
@@ -82,6 +94,14 @@ export default function BatchPage() {
             />
 
                         <div className="prediction-controls">
+                            {availableModels.length > 0 && (
+                                <ModelSelector
+                                    models={availableModels}
+                                    value={model}
+                                    onChange={setModel}
+                                />
+                            )}
+
                             <NewspaperButton onClick={handleSubmit}>
                                 ANALYZE BATCH
                             </NewspaperButton>
@@ -105,6 +125,7 @@ export default function BatchPage() {
                                 <thead>
                                 <tr>
                                     <th>#</th>
+                                    <th>Preview</th>
                                     <th>Prediction</th>
                                     <th>Confidence</th>
                                 </tr>
@@ -112,39 +133,29 @@ export default function BatchPage() {
 
                                 <tbody>
                                 {result.map((item, i) => (
-                                    <tr key={`${i}-${item.id || item.article || i}`}>
+                                    <tr key={i}>
                                         <td>{i + 1}</td>
+
+                                        <td className="text-preview">
+                                            {item.text_preview || `Article ${i + 1}`}
+                                        </td>
 
                                         <td>
                         <span
                             className={
-                                (
-                                    item.prediction ||
-                                    item.label ||
-                                    item.verdict ||
-                                    ""
-                                )
-                                    .toLowerCase()
-                                    .includes("fake")
+                                (item.label || "").toLowerCase() === "fake"
                                     ? "badge-fake"
                                     : "badge-real"
                             }
                         >
-                          {item.prediction ||
-                              item.label ||
-                              item.verdict ||
-                              "Unknown"}
+                          {item.label || "Unknown"}
                         </span>
                                         </td>
 
                                         <td>
-                                            {Math.round(
-                                                item.confidence ||
-                                                item.score ||
-                                                item.probability ||
-                                                0
-                                            )}
-                                            %
+                                            {item.confidence != null
+                                                ? `${Math.round(item.confidence * 100)}%`
+                                                : "N/A"}
                                         </td>
                                     </tr>
                                 ))}
