@@ -1,0 +1,51 @@
+/* src/styles/ticker.css */
+
+.ticker{
+    height:52px;
+    display:flex;
+    align-items:center;
+    border-top:1px solid var(--border);
+    border-bottom:1px solid var(--border);
+    background:var(--card);
+    overflow:hidden;
+}
+
+.ticker-tag{
+    height:100%;
+    padding:0 28px;
+    display:flex;
+    align-items:center;
+    background:var(--text);
+    color:var(--card);
+    font-weight:700;
+    letter-spacing:2px;
+    flex-shrink:0;
+}
+
+.ticker-wrapper{
+    overflow:hidden;
+    width:100%;
+}
+
+.ticker-track{
+    display:flex;
+    gap:80px;
+    width:max-content;
+    padding-left:40px;
+    animation:ticker 25s linear infinite;
+}
+
+.ticker-track span{
+    line-height:52px;
+    color:var(--muted);
+    white-space:nowrap;
+}
+
+@keyframes ticker{
+    from{
+        transform:translateX(0);
+    }
+    to{
+        transform:translateX(-50%);
+    }
+}
