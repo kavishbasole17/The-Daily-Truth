@@ -239,7 +239,7 @@ def train_and_save_classical(X_train, X_test, y_train, y_test):
                 'display_name': display,
                 'category':     'Classical ML',
                 'feature_type': feat,
-                'path':         os.path.relpath(path, BASE_DIR),
+                'path':         os.path.relpath(path, BASE_DIR).replace(os.sep, '/'),
                 'train_time':   elapsed,
                 'metrics':      m,
             }
@@ -398,7 +398,7 @@ def train_and_save_dl(X_train, X_test, y_train, y_test):
                 'display_name': display,
                 'category':     'Deep Learning',
                 'feature_type': 'sequence',
-                'path':         os.path.relpath(model_path, BASE_DIR),
+                'path':         os.path.relpath(model_path, BASE_DIR).replace(os.sep, '/'),
                 'train_time':   elapsed,
                 'metrics':      m,
             }
@@ -567,7 +567,7 @@ def train_and_save_hybrid(X_train, X_test, y_train, y_test):
             'display_name': 'Hybrid Stacking (LR)',
             'category':     'Hybrid',
             'feature_type': 'hybrid',
-            'path':         os.path.relpath(out_path, BASE_DIR),
+            'path':         os.path.relpath(out_path, BASE_DIR).replace(os.sep, '/'),
             'train_time':   elapsed,
             'metrics':      m,
         }

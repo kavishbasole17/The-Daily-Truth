@@ -20,6 +20,12 @@ HYBRID_DIR      = os.path.join(MODELS_DIR, 'hybrid')
 MAX_TEXT_LENGTH = 50_000
 
 
+def _resolve_registry_path(relative_path: str) -> str:
+    """registry.json may have been generated on Windows (backslash-separated
+    paths); normalize before joining so it resolves correctly on any OS."""
+    return os.path.join(BASE_DIR, *re.split(r'[\\/]+', relative_path))
+
+
 # ── Text cleaning (mirrors preprocess.py) ────────────────────────────────────
 
 def clean_text(text: str) -> str:
@@ -99,7 +105,7 @@ class ModelRegistry:
         for name, info in self.registry.items():
             if info.get('category') != 'Classical ML':
                 continue
-            model_path = os.path.join(BASE_DIR, info['path'])
+            model_path = _resolve_registry_path(info['path'])
             if not os.path.exists(model_path):
                 logger.warning(f'Model file missing: {model_path}')
                 continue
@@ -134,7 +140,7 @@ class ModelRegistry:
         for name, info in self.registry.items():
             if info.get('category') != 'Deep Learning':
                 continue
-            model_path = os.path.join(BASE_DIR, info['path'])
+            model_path = _resolve_registry_path(info['path'])
             if not os.path.exists(model_path):
                 logger.warning(f'DL model file missing: {model_path}')
                 continue

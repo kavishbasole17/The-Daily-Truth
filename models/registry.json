@@ -3,7 +3,7 @@
     "display_name": "Logistic Regression",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\logistic_regression.joblib",
+    "path": "models/classical/logistic_regression.joblib",
     "train_time": 3.64,
     "metrics": {
       "accuracy": 0.8287012676393207,
@@ -17,7 +17,7 @@
     "display_name": "Multinomial Naive Bayes",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\multinomial_nb.joblib",
+    "path": "models/classical/multinomial_nb.joblib",
     "train_time": 0.08,
     "metrics": {
       "accuracy": 0.7724467830662521,
@@ -31,7 +31,7 @@
     "display_name": "Bernoulli Naive Bayes",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\bernoulli_nb.joblib",
+    "path": "models/classical/bernoulli_nb.joblib",
     "train_time": 0.17,
     "metrics": {
       "accuracy": 0.7304950968667783,
@@ -45,7 +45,7 @@
     "display_name": "Complement Naive Bayes",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\complement_nb.joblib",
+    "path": "models/classical/complement_nb.joblib",
     "train_time": 0.07,
     "metrics": {
       "accuracy": 0.7578091365701985,
@@ -59,7 +59,7 @@
     "display_name": "Linear SVM",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\linear_svm.joblib",
+    "path": "models/classical/linear_svm.joblib",
     "train_time": 4.62,
     "metrics": {
       "accuracy": 0.8242047357091605,
@@ -73,7 +73,7 @@
     "display_name": "Decision Tree",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\decision_tree.joblib",
+    "path": "models/classical/decision_tree.joblib",
     "train_time": 159.02,
     "metrics": {
       "accuracy": 0.8171729251375269,
@@ -87,7 +87,7 @@
     "display_name": "Random Forest",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\random_forest.joblib",
+    "path": "models/classical/random_forest.joblib",
     "train_time": 81.55,
     "metrics": {
       "accuracy": 0.8335326476919397,
@@ -101,7 +101,7 @@
     "display_name": "Extra Trees",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\extra_trees.joblib",
+    "path": "models/classical/extra_trees.joblib",
     "train_time": 114.85,
     "metrics": {
       "accuracy": 0.8349198756278402,
@@ -115,7 +115,7 @@
     "display_name": "AdaBoost",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\adaboost.joblib",
+    "path": "models/classical/adaboost.joblib",
     "train_time": 288.25,
     "metrics": {
       "accuracy": 0.775843099736905,
@@ -129,7 +129,7 @@
     "display_name": "Ridge Classifier",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\ridge_classifier.joblib",
+    "path": "models/classical/ridge_classifier.joblib",
     "train_time": 2.47,
     "metrics": {
       "accuracy": 0.8306146854819422,
@@ -143,7 +143,7 @@
     "display_name": "SGD Classifier",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\sgd_classifier.joblib",
+    "path": "models/classical/sgd_classifier.joblib",
     "train_time": 0.79,
     "metrics": {
       "accuracy": 0.8313800526189906,
@@ -157,7 +157,7 @@
     "display_name": "Passive Aggressive",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\passive_aggressive.joblib",
+    "path": "models/classical/passive_aggressive.joblib",
     "train_time": 3.5,
     "metrics": {
       "accuracy": 0.7884238220521407,
@@ -171,7 +171,7 @@
     "display_name": "Perceptron",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\perceptron.joblib",
+    "path": "models/classical/perceptron.joblib",
     "train_time": 0.92,
     "metrics": {
       "accuracy": 0.7907677589093518,
@@ -185,7 +185,7 @@
     "display_name": "MLP Classifier",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\mlp_classifier.joblib",
+    "path": "models/classical/mlp_classifier.joblib",
     "train_time": 1329.3,
     "metrics": {
       "accuracy": 0.8324802678784979,
@@ -199,7 +199,7 @@
     "display_name": "KNN",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\knn.joblib",
+    "path": "models/classical/knn.joblib",
     "train_time": 0.02,
     "metrics": {
       "accuracy": 0.7504424778761062,
@@ -213,7 +213,7 @@
     "display_name": "Gradient Boosting",
     "category": "Classical ML",
     "feature_type": "dense",
-    "path": "models\\classical\\gradient_boosting.joblib",
+    "path": "models/classical/gradient_boosting.joblib",
     "train_time": 125.35,
     "metrics": {
       "accuracy": 0.7782348720401818,
@@ -227,7 +227,7 @@
     "display_name": "LightGBM",
     "category": "Classical ML",
     "feature_type": "tfidf",
-    "path": "models\\classical\\lightgbm.joblib",
+    "path": "models/classical/lightgbm.joblib",
     "train_time": 79.98,
     "metrics": {
       "accuracy": 0.8531930160248744,
@@ -241,7 +241,7 @@
     "display_name": "CatBoost",
     "category": "Classical ML",
     "feature_type": "dense",
-    "path": "models\\classical\\catboost.joblib",
+    "path": "models/classical/catboost.joblib",
     "train_time": 2.39,
     "metrics": {
       "accuracy": 0.7900980626644344,
@@ -255,7 +255,7 @@
     "display_name": "LSTM",
     "category": "Deep Learning",
     "feature_type": "sequence",
-    "path": "models\\deep_learning\\lstm.keras",
+    "path": "models/deep_learning/lstm.keras",
     "train_time": 2125.4,
     "metrics": {
       "accuracy": 0.8088973929681894,
@@ -267,7 +267,7 @@
     "display_name": "GRU",
     "category": "Deep Learning",
     "feature_type": "sequence",
-    "path": "models\\deep_learning\\gru.keras",
+    "path": "models/deep_learning/gru.keras",
     "train_time": 764.14,
     "metrics": {
       "accuracy": 0.8180817986127721,
@@ -279,7 +279,7 @@
     "display_name": "CNN",
     "category": "Deep Learning",
     "feature_type": "sequence",
-    "path": "models\\deep_learning\\cnn.keras",
+    "path": "models/deep_learning/cnn.keras",
     "train_time": 94.01,
     "metrics": {
       "accuracy": 0.8231523558957188,
@@ -291,7 +291,7 @@
     "display_name": "CNN + LSTM",
     "category": "Deep Learning",
     "feature_type": "sequence",
-    "path": "models\\deep_learning\\cnn_lstm.keras",
+    "path": "models/deep_learning/cnn_lstm.keras",
     "train_time": 153.27,
     "metrics": {
       "accuracy": 0.8299449892370246,
