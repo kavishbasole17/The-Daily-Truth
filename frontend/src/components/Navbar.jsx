@@ -11,6 +11,7 @@ export default function Navbar() {
 
     const links = [
         ["Home", "/"],
+        ["Paper Trail", "/verify"],
         ["Single Check", "/single"],
         ["Consensus", "/consensus"],
         ["Batch Analysis", "/batch"],

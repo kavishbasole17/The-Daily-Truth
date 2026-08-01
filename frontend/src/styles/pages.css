@@ -69,6 +69,17 @@
     border-color:rgba(193,18,31,.4);
 }
 
+.uncertain-card{
+    border-color:rgba(234,179,8,.45);
+}
+
+.review-flag{
+    margin-top:8px;
+    color:#b45309;
+    font-size:.9rem;
+    font-weight:600;
+}
+
 .verdict-card h2{
     margin-bottom:12px;
     color:var(--text);
@@ -326,6 +337,76 @@
     color:#c1121f;
 }
 
+.badge-neutral{
+    padding:8px 14px;
+    border-radius:4px;
+    display:inline-block;
+    font-size:.85rem;
+    font-weight:600;
+    background:rgba(148,163,184,.18);
+    color:var(--muted);
+}
+
+.claim-trail{
+    margin-top:32px;
+}
+
+.claim-trail h3{
+    margin-bottom:16px;
+    color:var(--text);
+}
+
+.claim-trail .muted{
+    color:var(--muted);
+}
+
+.claim-item{
+    padding:24px;
+    margin-bottom:16px;
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:4px;
+}
+
+.claim-item-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:12px;
+}
+
+.claim-confidence{
+    color:var(--muted);
+    font-size:.85rem;
+}
+
+.claim-text{
+    color:var(--text);
+    font-style:italic;
+    margin-bottom:12px;
+}
+
+.evidence-list{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    padding-left:20px;
+    color:var(--muted);
+    font-size:.9rem;
+    line-height:1.6;
+}
+
+.reasoning-trace{
+    margin-top:24px;
+}
+
+.reasoning-trace pre{
+    white-space:pre-wrap;
+    font-family:inherit;
+    font-size:.9rem;
+    line-height:1.7;
+}
+
 .models-grid{
     display:grid;
     grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
@@ -358,6 +439,13 @@
     margin-bottom:24px;
     padding-right:60px;
     color:var(--text);
+}
+
+.model-not-loaded{
+    margin-bottom:16px;
+    color:#b45309;
+    font-size:.85rem;
+    font-weight:600;
 }
 
 .model-metrics{

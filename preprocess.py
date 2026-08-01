@@ -27,7 +27,7 @@ def _check_path(path):
 
 
 def load_isot():
-    print("  [1/5] Loading ISOT Dataset...")
+    print("  [1/6] Loading ISOT Dataset...")
     fake_path = os.path.join(DATASET_PATH, "ISOT", "Fake.csv")
     true_path = os.path.join(DATASET_PATH, "ISOT", "True.csv")
     _check_path(fake_path)
@@ -45,7 +45,7 @@ def load_isot():
 
 
 def load_fakenewsnet():
-    print("  [2/5] Loading FakeNewsNet Dataset...")
+    print("  [2/6] Loading FakeNewsNet Dataset...")
     files = [
         ("gossipcop_fake.csv", 0),
         ("gossipcop_real.csv", 1),
@@ -67,7 +67,7 @@ def load_fakenewsnet():
 
 
 def load_liar():
-    print("  [3/5] Loading LIAR Dataset...")
+    print("  [3/6] Loading LIAR Dataset...")
     cols = [
         'id', 'label', 'statement', 'subject', 'speaker', 'speaker_title',
         'state', 'party', 'mostly_true_counts', 'false_counts',
@@ -95,7 +95,7 @@ def load_liar():
 
 
 def load_multifc():
-    print("  [4/5] Loading MultiFC Dataset...")
+    print("  [4/6] Loading MultiFC Dataset...")
     path = os.path.join(DATASET_PATH, "MultiFC", "merged_fakenews.csv")
     _check_path(path)
     df = pd.read_csv(path, on_bad_lines='skip')
@@ -110,7 +110,7 @@ def load_multifc():
 
 
 def load_buzzfeed():
-    print("  [5/5] Loading BuzzFeed Dataset...")
+    print("  [5/6] Loading BuzzFeed Dataset...")
     path = os.path.join(DATASET_PATH, "BuzzFeed", "facebook-fact-check.csv")
     _check_path(path)
     df = pd.read_csv(path, on_bad_lines='skip')
@@ -130,6 +130,18 @@ def load_buzzfeed():
     return result
 
 
+def load_adversarial():
+    print("  [6/6] Loading Adversarial (style-matched hard negatives) Dataset...")
+    path = os.path.join(DATASET_PATH, "Adversarial", "adversarial_style.csv")
+    _check_path(path)
+    df = pd.read_csv(path, encoding='utf-8', on_bad_lines='skip')
+    df['text_content'] = df['text_content'].fillna('')
+    df['source'] = 'Adversarial'
+    result = df[['text_content', 'label', 'source']]
+    print(f"      Loaded {len(result):,} records  (Fake={(result.label==0).sum():,}  Real={(result.label==1).sum():,})")
+    return result
+
+
 def load_all_datasets():
     print("\n" + "="*60)
     print("  LOADING ALL DATASETS")
@@ -141,6 +153,7 @@ def load_all_datasets():
         load_liar(),
         load_multifc(),
         load_buzzfeed(),
+        load_adversarial(),
     ]
 
     df = pd.concat(datasets, ignore_index=True)
@@ -158,10 +171,33 @@ def load_all_datasets():
     return df
 
 
-def get_train_test_split(df, test_size=0.2, random_state=42):
+def get_train_test_split(df, test_size=0.2, random_state=42,
+                          oversample_source=None, oversample_factor=1):
+    """
+    Splits into train/test. If oversample_source is given, rows from that
+    'source' landing in the *training* split are repeated oversample_factor
+    times so a small but important slice of data (e.g. hard negatives) carries
+    proportionally more weight during training. The test set is left untouched
+    so evaluation metrics stay honest.
+    """
     X = df['text_clean'].values
     y = df['label'].values
-    return train_test_split(X, y, test_size=test_size, random_state=random_state, stratify=y)
+
+    if oversample_source is None or 'source' not in df.columns:
+        return train_test_split(X, y, test_size=test_size, random_state=random_state, stratify=y)
+
+    src = df['source'].values
+    X_train, X_test, y_train, y_test, src_train, _ = train_test_split(
+        X, y, src, test_size=test_size, random_state=random_state, stratify=y
+    )
+
+    if oversample_factor > 1:
+        mask = src_train == oversample_source
+        if mask.any():
+            X_train = np.concatenate([X_train] + [X_train[mask]] * (oversample_factor - 1))
+            y_train = np.concatenate([y_train] + [y_train[mask]] * (oversample_factor - 1))
+
+    return X_train, X_test, y_train, y_test
 
 
 if __name__ == "__main__":

@@ -1,20 +1,28 @@
 """
-FastAPI backend for Fake News Detection.
+FastAPI backend for Fake News Detection — Paper Trail.
 
 Setup:
     1. python export_models.py          # train & save all models (run once)
     2. uvicorn api.main:app --reload    # start the API (from capstone-final/)
 
-Endpoints:
-    GET  /                       API info
-    GET  /health                 Health + loaded model counts
-    GET  /models                 All available models with metrics
-    POST /predict                Classify with a single named model
-    POST /predict/all            Classify with every model + majority-vote consensus
-    POST /predict/batch          Classify a list of texts with one model (max 100)
-    GET  /results                Benchmark CSV results as JSON
-    GET  /results/charts         List available chart images
-    GET  /results/charts/{name}  Serve a chart PNG by name
+Existing endpoints (unchanged):
+    GET  /                         API info
+    GET  /health                   Health + loaded model counts
+    GET  /models                   All available models with metrics
+    POST /predict                  Classify with a single named model
+    POST /predict/all              Classify with every model + majority-vote consensus
+    POST /predict/batch            Classify a list of texts with one model (max 100)
+    GET  /results                  Benchmark CSV results as JSON
+    GET  /results/charts           List available chart images
+    GET  /results/charts/{name}    Serve a chart PNG by name
+
+New endpoints (agentic pipeline + persistence):
+    POST /auth/token               Obtain a JWT bearer token
+    POST /articles/submit          Run verification pipeline, persist result  [auth required]
+    GET  /articles/{id}            Retrieve stored article + verdict
+    GET  /review-queue             Articles flagged needs_human_review (paginated)
+    POST /review-queue/{id}/resolve  Analyst manual verdict override          [auth required]
+    GET  /models/registry          Benchmark data from registry.json
 """
 
 from __future__ import annotations
@@ -38,6 +46,11 @@ from api.schemas import (
     ResultsResponse, SinglePrediction,
 )
 from api.model_loader import ModelRegistry, clean_text
+from api.database import create_tables
+from api.routers import auth as auth_router
+from api.routers import articles as articles_router
+from api.routers import review_queue as rq_router
+from api.routers import model_registry as reg_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -60,6 +73,14 @@ CHART_META = {
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialise SQLite tables for article persistence
+    try:
+        create_tables()
+        logger.info('Database tables initialised.')
+    except Exception as e:
+        logger.error(f'Failed to create DB tables: {e}')
+
+    # Load ML models from disk
     logger.info('Loading models from disk...')
     try:
         registry.load_all()
@@ -77,14 +98,17 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title='Fake News Detection API',
+    title='Paper Trail — Fake News Detection API',
     description=(
         'Classifies news text as **fake (0)** or **real (1)** using up to 22 '
-        'trained ML/DL models.\n\n'
+        'trained ML/DL models, plus an agentic LangGraph verification pipeline '
+        'with NLI claim checking and evidence retrieval.\n\n'
         '**Before starting:** run `python export_models.py` once to train and '
-        'save all models to the `models/` directory.'
+        'save all models to the `models/` directory.\n\n'
+        '**Auth:** `POST /auth/token` with `admin`/`admin123` or `analyst`/`analyst123` '
+        'to get a JWT for protected endpoints.'
     ),
-    version='1.0.0',
+    version='2.0.0',
     lifespan=lifespan,
 )
 
@@ -96,8 +120,14 @@ app.add_middleware(
     allow_headers=['*'],
 )
 
+# ── New routers ────────────────────────────────────────────────────────────────
+app.include_router(auth_router.router)
+app.include_router(articles_router.router)
+app.include_router(rq_router.router)
+app.include_router(reg_router.router)
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _require_models():
     if registry.total_loaded == 0:
@@ -116,8 +146,8 @@ def _require_models():
 @app.get('/', tags=['Info'])
 async def root() -> dict[str, Any]:
     return {
-        'name':          'Fake News Detection API',
-        'version':       '1.0.0',
+        'name':          'Paper Trail — Fake News Detection API',
+        'version':       '2.0.0',
         'models_loaded': registry.total_loaded,
         'docs':          '/docs',
         'redoc':         '/redoc',
@@ -140,7 +170,7 @@ async def health() -> HealthResponse:
 @app.get('/models', response_model=ModelsListResponse, tags=['Models'])
 async def list_models() -> ModelsListResponse:
     """Returns metadata and evaluation metrics for every exported model."""
-    models = registry.list_models()
+    models   = registry.list_models()
     classical = [m for m in models if m['category'] == 'Classical ML']
     dl        = [m for m in models if m['category'] == 'Deep Learning']
     hybrid    = [m for m in models if m['category'] == 'Hybrid']
@@ -196,10 +226,10 @@ async def predict_all(req: PredictAllRequest) -> PredictAllResponse:
             detail='No models produced a result.',
         )
 
-    votes         = [r['prediction'] for r in results]
-    real_votes    = sum(votes)
-    consensus_pred  = 1 if real_votes > len(votes) / 2 else 0
-    consensus_label = 'real' if consensus_pred == 1 else 'fake'
+    votes            = [r['prediction'] for r in results]
+    real_votes       = sum(votes)
+    consensus_pred   = 1 if real_votes > len(votes) / 2 else 0
+    consensus_label  = 'real' if consensus_pred == 1 else 'fake'
 
     winning_confs = [
         r['prob_real'] if consensus_pred == 1 else r['prob_fake']
@@ -245,7 +275,7 @@ async def predict_batch(req: PredictBatchRequest) -> PredictBatchResponse:
 async def get_results() -> ResultsResponse:
     """
     Returns benchmark results from the last training run as JSON.
-    Reads `results/all_results.csv` generated by main.py or export_models.py.
+    Reads `results/all_results.csv` generated by export_models.py.
     """
     csv_path = os.path.join(RESULTS_DIR, 'all_results.csv')
     if not os.path.exists(csv_path):
@@ -253,12 +283,11 @@ async def get_results() -> ResultsResponse:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=(
                 'results/all_results.csv not found. '
-                'Run `python main.py` or `python export_models.py` first.'
+                'Run `python export_models.py` first.'
             ),
         )
 
     df = pd.read_csv(csv_path)
-
     required = {'model', 'category'}
     missing  = required - set(df.columns)
     if missing:
@@ -282,7 +311,7 @@ async def get_results() -> ResultsResponse:
         for _, row in df.iterrows()
     ]
 
-    valid = df.dropna(subset=['accuracy'])
+    valid    = df.dropna(subset=['accuracy'])
     best_row = valid.loc[valid['accuracy'].idxmax()] if not valid.empty else None
 
     return ResultsResponse(
@@ -325,7 +354,7 @@ async def get_chart(name: str) -> FileResponse:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=(
                 f"Chart '{name}.png' not found. "
-                'Run `python main.py` to generate charts.'
+                'Run `python export_models.py` to generate charts.'
             ),
         )
     return FileResponse(path, media_type='image/png')

@@ -1,9 +1,22 @@
 # IDE
 .idea/
+.vscode/
 
 # Python
 __pycache__/
 *.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Backend runtime / generated artifacts
+*.db
+*.sqlite3
+.env
+.env.example
+catboost_info/
 
 # Frontend
 frontend/node_modules/
@@ -13,3 +26,4 @@ frontend/.idea/
 
 # OS
 .DS_Store
+Thumbs.db

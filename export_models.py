@@ -41,7 +41,7 @@ def compute_metrics(model, X_te, y_te):
         elif hasattr(model, 'decision_function'):
             s = model.decision_function(X_te)
             s = s if s.ndim == 1 else s[:, 1]
-            y_prob = (s - s.min()) / (s.max() - s.min() + 1e-10)
+            y_prob = 1.0 / (1.0 + np.exp(-s))
         else:
             y_prob = y_pred.astype(float)
         auc = float(roc_auc_score(y_te, y_prob))
@@ -69,7 +69,13 @@ def load_data():
     print('  Loading datasets...')
     print('='*60)
     df = load_all_datasets()
-    X_train, X_test, y_train, y_test = get_train_test_split(df)
+    # Oversample the style-matched adversarial set in the training split so
+    # this small-but-important hard-negative slice carries real weight
+    # against classifiers keying on writing style rather than content
+    # (test set is left untouched, so evaluation metrics stay honest).
+    X_train, X_test, y_train, y_test = get_train_test_split(
+        df, oversample_source='Adversarial', oversample_factor=15
+    )
     print(f'  Train: {len(X_train):,}  |  Test: {len(X_test):,}')
     return X_train, X_test, y_train, y_test
 
@@ -419,7 +425,7 @@ def _get_prob_export(model, X):
     elif hasattr(model, 'decision_function'):
         s = model.decision_function(X)
         s = s if s.ndim == 1 else s[:, 1]
-        return (s - s.min()) / (s.max() - s.min() + 1e-10)
+        return 1.0 / (1.0 + np.exp(-s))
     return model.predict(X).astype(float)
 
 

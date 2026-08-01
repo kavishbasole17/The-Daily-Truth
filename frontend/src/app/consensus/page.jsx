@@ -91,7 +91,7 @@ export default function ConsensusPage() {
 
                     {result && (
                         <>
-                            <div className="consensus-banner glass">
+                            <div className={`consensus-banner glass ${verdict === "fake" ? "fake-card" : "real-card"}`}>
                                 <h2>{verdict.toUpperCase()}</h2>
                                 <p>{agreement}% Agreement</p>
                             </div>
@@ -109,7 +109,13 @@ export default function ConsensusPage() {
                                         <div className="model-content">
                                             <div>
                                                 Prediction:{" "}
-                                                <strong>{m.label}</strong>
+                                                <span className={
+                                                    (m.label || "").toLowerCase() === "fake"
+                                                        ? "badge-fake"
+                                                        : "badge-real"
+                                                }>
+                                                    {m.label || "Unknown"}
+                                                </span>
                                             </div>
 
                                             <div>

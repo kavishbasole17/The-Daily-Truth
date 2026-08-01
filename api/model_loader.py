@@ -171,9 +171,13 @@ class ModelRegistry:
         if hasattr(model, 'predict_proba'):
             return model.predict_proba(X)[:, 1]
         elif hasattr(model, 'decision_function'):
+            # Margin-based models (SVM, Ridge, Perceptron, PassiveAggressive) have no
+            # calibrated probability output. Min-max scaling over the batch is degenerate
+            # for single-sample requests (min == max => always 0), so use a sigmoid of the
+            # signed distance to the decision boundary instead — well-defined per-sample.
             s = model.decision_function(X)
             s = s if s.ndim == 1 else s[:, 1]
-            return (s - s.min()) / (s.max() - s.min() + 1e-10)
+            return 1.0 / (1.0 + np.exp(-s))
         return model.predict(X).astype(float)
 
     def _build_result(self, name: str, prob_real: float,

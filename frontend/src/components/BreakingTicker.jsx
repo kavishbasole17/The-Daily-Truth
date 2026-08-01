@@ -6,9 +6,9 @@ export default function BreakingTicker() {
     const items = [
         "AI Credibility Engine Online",
         "Consensus Analysis Available",
-        "RoBERTa Leading Accuracy Rankings",
+        "22 ML Models Benchmarked Live",
         "Batch Verification Enabled",
-        "Fake News Detection Active"
+        "Evidence-Grounded Verification Active"
     ];
 
     return (

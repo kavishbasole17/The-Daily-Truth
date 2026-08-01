@@ -35,4 +35,20 @@ export const consensusPredict = payload =>
 export const batchPredict = payload =>
     api.post("/predict/batch", payload);
 
+// ── Agentic verification pipeline (evidence-grounded) ──────────────────────
+// Demo credentials (see README) — fine for a capstone demo; a real deployment
+// would use a proper login flow instead of fetching a token per submission.
+const getDemoToken = () =>
+    api.post("/auth/token", { username: "admin", password: "admin123" })
+        .then(({ data }) => data.access_token);
+
+export const submitForVerification = async (text) => {
+    const token = await getDemoToken();
+    return api.post(
+        "/articles/submit",
+        { text },
+        { headers: { Authorization: `Bearer ${token}` } }
+    );
+};
+
 export default api;

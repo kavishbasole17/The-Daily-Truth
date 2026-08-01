@@ -44,11 +44,15 @@ export default function ModelsPage() {
         loadModels();
     }, []);
 
+    // Metrics live under model.metrics.{accuracy,f1,precision,recall,auc} per
+    // the /models response schema (ModelInfo) — not top-level fields.
     const sortedModels = [...models].sort(
         (a, b) =>
-            (b.accuracy || b.f1_score || 0) -
-            (a.accuracy || a.f1_score || 0)
+            (b.metrics?.accuracy ?? b.metrics?.f1 ?? 0) -
+            (a.metrics?.accuracy ?? a.metrics?.f1 ?? 0)
     );
+
+    const pct = (v) => (typeof v === "number" ? `${(v * 100).toFixed(1)}%` : "N/A");
 
     return (
         <>
@@ -93,47 +97,37 @@ export default function ModelsPage() {
                                             `Model ${index + 1}`}
                                     </h2>
 
+                                    {!model.loaded && (
+                                        <p className="model-not-loaded">Not loaded on this server</p>
+                                    )}
+
                                     <div className="model-metrics">
                                         <div>
                                             <span>Accuracy</span>
-                                            <strong>
-                                                {model.accuracy ??
-                                                    model.acc ??
-                                                    "N/A"}
-                                            </strong>
+                                            <strong>{pct(model.metrics?.accuracy)}</strong>
                                         </div>
 
                                         <div>
                                             <span>F1 Score</span>
-                                            <strong>
-                                                {model.f1_score ??
-                                                    model.f1 ??
-                                                    "N/A"}
-                                            </strong>
+                                            <strong>{pct(model.metrics?.f1)}</strong>
                                         </div>
 
                                         <div>
                                             <span>Precision</span>
-                                            <strong>
-                                                {model.precision ??
-                                                    "N/A"}
-                                            </strong>
+                                            <strong>{pct(model.metrics?.precision)}</strong>
                                         </div>
 
                                         <div>
                                             <span>Recall</span>
-                                            <strong>
-                                                {model.recall ??
-                                                    "N/A"}
-                                            </strong>
+                                            <strong>{pct(model.metrics?.recall)}</strong>
                                         </div>
 
                                         <div>
-                                            <span>Inference</span>
+                                            <span>AUC</span>
                                             <strong>
-                                                {model.inference_time ??
-                                                    model.speed ??
-                                                    "N/A"}
+                                                {typeof model.metrics?.auc === "number"
+                                                    ? model.metrics.auc.toFixed(4)
+                                                    : "N/A"}
                                             </strong>
                                         </div>
                                     </div>
