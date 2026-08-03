@@ -1,18 +1,40 @@
 @import "@fontsource/inter";
+@import "@fontsource/inter/700.css";
+@import "@fontsource/inter/800.css";
+@import "@fontsource/inter/900.css";
 @import "@fontsource/playfair-display";
 
-:root{
-    --red:#1a1a1a;
-    --red2:#2d2d2d;
-    --yellow:#1a1a1a;
-    --yellow2:#000;
+:root,
+:root[data-theme="dark"]{
+    --red:#e10600;
+    --red2:#ff2d2d;
+    --yellow:#eab308;
+    --yellow2:#b45309;
+    --bg:#0c0c0c;
+    --card:#1a1a1a;
+    --border:#2c2c2c;
+    --text:#f2f2f2;
+    --muted:#9a9a9a;
+    --success:#22c55e;
+    --radius:8px;
+}
+
+:root[data-theme="light"]{
+    --red:#c1121f;
+    --red2:#e0202f;
+    --yellow:#b45309;
+    --yellow2:#92400e;
     --bg:#f5f3f0;
     --card:#ffffff;
     --border:#e0ddd9;
     --text:#1a1a1a;
     --muted:#666666;
-    --success:#22c55e;
+    --success:#16a34a;
     --radius:8px;
+}
+
+body{
+    transition:background-color .2s ease, color .2s ease;
 }
 
 *{
@@ -51,7 +73,9 @@ body::after{
 }
 
 h1,h2,h3,h4,h5,h6{
-    font-family:"Playfair Display",serif;
+    font-family:Inter,sans-serif;
+    font-weight:800;
+    letter-spacing:-.02em;
 }
 
 a{
@@ -88,19 +112,19 @@ select{
 }
 
 .red{
-    color:#c1121f;
+    color:var(--red);
 }
 
 .yellow{
-    color:#1a1a1a;
+    color:var(--yellow);
 }
 
 .real{
-    color:#22c55e;
+    color:var(--success);
 }
 
 .fake{
-    color:#c1121f;
+    color:var(--red);
 }
 
 .scrollbar::-webkit-scrollbar{
@@ -108,6 +132,6 @@ select{
 }
 
 .scrollbar::-webkit-scrollbar-thumb{
-    background:var(--text);
+    background:var(--border);
     border-radius:999px;
 }

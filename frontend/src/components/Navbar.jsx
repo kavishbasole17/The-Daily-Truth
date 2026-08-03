@@ -4,6 +4,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import ThemeToggle from "@/components/ThemeToggle";
 import "@/styles/navbar.css";
 
 export default function Navbar() {
@@ -42,6 +43,8 @@ export default function Navbar() {
                     <span className="dot" />
                     API Online
                 </div>
+
+                <ThemeToggle />
             </div>
         </nav>
     );

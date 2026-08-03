@@ -6,7 +6,10 @@
 }
 
 .section-title h2{
-    font-size:3rem;
+    font-size:2.6rem;
+    font-weight:900;
+    text-transform:uppercase;
+    letter-spacing:-.5px;
     color:var(--text);
 }
 
@@ -72,6 +75,6 @@
 }
 
 .health-widget.checking span{
-    background:var(--text);
-    box-shadow:0 0 12px rgba(0,0,0,.3);
+    background:var(--yellow);
+    box-shadow:0 0 12px rgba(234,179,8,.4);
 }

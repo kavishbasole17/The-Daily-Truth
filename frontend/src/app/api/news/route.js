@@ -1,79 +1,120 @@
 // src/app/api/news/route.js
+//
+// Pulls live headlines directly from Times of India and Hindustan Times RSS
+// feeds (no API key required) instead of NewsAPI, per category.
 
-// Some publishers in NewsAPI's aggregated feed serve their own content with
-// mismatched encoding upstream (valid UTF-8 bytes that got decoded as
-// Latin-1/Windows-1252 somewhere in their own pipeline before reaching
-// NewsAPI), which shows up as mojibake like "donâ€™t" instead of "don't".
-// Repair it only when the tell-tale byte pattern is present, and only keep
-// the repair if reinterpreting the bytes as UTF-8 actually succeeds —
-// otherwise leave the original text untouched rather than risk mangling it
-// further.
-function repairMojibake(text) {
-    if (typeof text !== "string" || !text || !/[ÂÃâ€]/.test(text)) return text;
-    if ([...text].some((ch) => ch.charCodeAt(0) > 255)) return text;
-    try {
-        const bytes = Uint8Array.from([...text].map((ch) => ch.charCodeAt(0)));
-        return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch {
-        return text;
-    }
+import { XMLParser } from "fast-xml-parser";
+
+const FEEDS = {
+    all: [
+        { source: "Times of India", url: "https://timesofindia.indiatimes.com/rssfeedstopstories.cms" },
+        { source: "Hindustan Times", url: "https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml" }
+    ],
+    india: [
+        { source: "Times of India", url: "https://timesofindia.indiatimes.com/rssfeeds/-2128936835.cms" },
+        { source: "Hindustan Times", url: "https://www.hindustantimes.com/feeds/rss/india-news/rssfeed.xml" }
+    ],
+    world: [
+        { source: "Times of India", url: "https://timesofindia.indiatimes.com/rssfeeds/296589292.cms" },
+        { source: "Hindustan Times", url: "https://www.hindustantimes.com/feeds/rss/world-news/rssfeed.xml" }
+    ],
+    sports: [
+        { source: "Times of India", url: "https://timesofindia.indiatimes.com/rssfeeds/4719148.cms" },
+        { source: "Hindustan Times", url: "https://www.hindustantimes.com/feeds/rss/sports/rssfeed.xml" }
+    ],
+    business: [
+        { source: "Times of India", url: "https://timesofindia.indiatimes.com/rssfeeds/1898055.cms" },
+        { source: "Hindustan Times", url: "https://www.hindustantimes.com/feeds/rss/business/rssfeed.xml" }
+    ],
+    entertainment: [
+        { source: "Times of India", url: "https://timesofindia.indiatimes.com/rssfeeds/1081479906.cms" },
+        { source: "Hindustan Times", url: "https://www.hindustantimes.com/feeds/rss/entertainment/rssfeed.xml" }
+    ],
+    technology: [
+        { source: "Times of India", url: "https://timesofindia.indiatimes.com/rssfeeds/66949542.cms" },
+        { source: "Hindustan Times", url: "https://www.hindustantimes.com/feeds/rss/technology/rssfeed.xml" }
+    ]
+};
+
+const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
+
+const HTML_ENTITIES = {
+    "&nbsp;": " ", "&amp;": "&", "&quot;": "\"", "&#39;": "'", "&apos;": "'",
+    "&lt;": "<", "&gt;": ">", "&rsquo;": "’", "&lsquo;": "‘",
+    "&rdquo;": "”", "&ldquo;": "“", "&mdash;": "—", "&ndash;": "–"
+};
+
+function cleanText(value) {
+    if (typeof value !== "string") return "";
+    const withoutTags = value.replace(/<[^>]*>/g, " ");
+    const decoded = withoutTags.replace(/&[a-z#0-9]+;/gi, (m) => HTML_ENTITIES[m] ?? m);
+    return decoded.replace(/\s+/g, " ").trim();
 }
 
-function repairArticle(article) {
-    return {
-        ...article,
-        title: repairMojibake(article.title),
-        description: repairMojibake(article.description),
-        author: repairMojibake(article.author),
-        content: repairMojibake(article.content),
-        source: article.source
-            ? { ...article.source, name: repairMojibake(article.source.name) }
-            : article.source,
-    };
+function extractImage(item) {
+    const media = item.enclosure ?? item["media:content"] ?? item["media:thumbnail"];
+    if (!media) return null;
+    const node = Array.isArray(media) ? media[0] : media;
+    return node?.["@_url"] ?? null;
+}
+
+async function fetchFeed({ source, url }, category) {
+    try {
+        const res = await fetch(url, {
+            headers: { "User-Agent": "Mozilla/5.0 (compatible; DailyTruthBot/1.0)" },
+            next: { revalidate: 300 }
+        });
+        if (!res.ok) return [];
+
+        const xml = await res.text();
+        const items = parser.parse(xml)?.rss?.channel?.item;
+        if (!items) return [];
+
+        const list = Array.isArray(items) ? items : [items];
+        return list
+            .map((item) => {
+                const title = cleanText(item.title);
+                const link = cleanText(item.link);
+                const pubDate = cleanText(item.pubDate);
+                return {
+                    title,
+                    description: cleanText(item.description),
+                    url: link,
+                    image: extractImage(item),
+                    source,
+                    category,
+                    publishedAt: pubDate ? new Date(pubDate).toISOString() : null
+                };
+            })
+            .filter((article) => article.title && article.url);
+    } catch (error) {
+        console.error(`Failed to fetch feed ${url}:`, error.message);
+        return [];
+    }
 }
 
 export async function GET(request) {
-    try {
-        const apiKey = process.env.NEXT_PUBLIC_NEWS_API_KEY;
-        const apiUrl = process.env.NEXT_PUBLIC_NEWS_API_URL;
+    const { searchParams } = new URL(request.url);
+    const category = (searchParams.get("category") || "all").toLowerCase();
+    const feeds = FEEDS[category] || FEEDS.all;
 
-        if (!apiKey || apiKey === "your_newsapi_key_here") {
-            return Response.json(
-                { error: "News API key not configured" },
-                { status: 400 }
-            );
-        }
+    const results = await Promise.all(feeds.map((feed) => fetchFeed(feed, category)));
 
-        const response = await fetch(
-            `${apiUrl}/top-headlines?category=general&language=en&apiKey=${apiKey}&pageSize=10`,
-            {
-                headers: {
-                    "User-Agent": "Mozilla/5.0 (compatible; NewsCarousel/1.0)"
-                }
-            }
-        );
+    const seen = new Set();
+    const articles = results
+        .flat()
+        .filter((article) => {
+            const key = article.title.toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        })
+        .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0))
+        .slice(0, 30);
 
-        if (!response.ok) {
-            const error = await response.json();
-            return Response.json(
-                {
-                    error: error.message || "Failed to fetch news from API",
-                    details: error
-                },
-                { status: response.status }
-            );
-        }
-
-        const data = await response.json();
-        if (Array.isArray(data.articles)) {
-            data.articles = data.articles.map(repairArticle);
-        }
-        return Response.json(data);
-    } catch (error) {
-        console.error("News API Error:", error);
-        return Response.json(
-            { error: "Internal server error: " + error.message },
-            { status: 500 }
-        );
+    if (articles.length === 0) {
+        return Response.json({ error: "No articles available", articles: [] }, { status: 502 });
     }
+
+    return Response.json({ articles, category });
 }

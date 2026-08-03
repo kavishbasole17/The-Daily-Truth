@@ -2,7 +2,7 @@
     position:fixed;
     inset:0;
     z-index:9999;
-    background:rgba(0,0,0,.15);
+    background:rgba(0,0,0,.6);
     backdrop-filter:blur(8px);
     display:flex;
     flex-direction:column;
@@ -14,8 +14,8 @@
 .loader{
     width:70px;
     height:70px;
-    border:5px solid rgba(0,0,0,.1);
-    border-top:5px solid var(--text);
+    border:5px solid rgba(255,255,255,.12);
+    border-top:5px solid var(--red);
     border-radius:50%;
     animation:spin .8s linear infinite;
 }
@@ -27,8 +27,8 @@
 }
 
 .newspaper-btn{
-    background:var(--text);
-    color:var(--card);
+    background:var(--red);
+    color:#fff;
     padding:14px 28px;
     border-radius:4px;
     transition:.25s;
@@ -36,7 +36,7 @@
 }
 
 .newspaper-btn:hover{
-    background:#333333;
+    background:var(--red2);
     transform:translateY(-2px);
 }
 
@@ -66,7 +66,7 @@
 }
 
 .fake-card{
-    border-color:rgba(193,18,31,.4);
+    border-color:rgba(225,6,0,.4);
 }
 
 .uncertain-card{
@@ -75,7 +75,7 @@
 
 .review-flag{
     margin-top:8px;
-    color:#b45309;
+    color:var(--yellow2);
     font-size:.9rem;
     font-weight:600;
 }
@@ -141,12 +141,12 @@
 
 .prob-real{
     height:100%;
-    background:#22c55e;
+    background:var(--success);
 }
 
 .prob-fake{
     height:100%;
-    background:#c1121f;
+    background:var(--red);
 }
 
 .prediction-page{
@@ -159,7 +159,10 @@
 }
 
 .page-header h1{
-    font-size:4rem;
+    font-size:3.4rem;
+    font-weight:900;
+    text-transform:uppercase;
+    letter-spacing:-1px;
     margin-bottom:16px;
     color:var(--text);
 }
@@ -219,11 +222,11 @@
 }
 
 .error-state{
-    border-color:rgba(193,18,31,.3);
+    border-color:rgba(225,6,0,.3);
 }
 
 .error-state h2{
-    color:#c1121f;
+    color:var(--red);
     margin-bottom:12px;
 }
 
@@ -248,7 +251,10 @@
 }
 
 .consensus-banner h2{
-    font-size:3rem;
+    font-size:2.6rem;
+    font-weight:900;
+    text-transform:uppercase;
+    letter-spacing:-.5px;
     margin-bottom:12px;
     color:var(--text);
 }
@@ -311,7 +317,7 @@
 .batch-table th{
     color:var(--text);
     font-weight:700;
-    background:rgba(0,0,0,.02);
+    background:rgba(255,255,255,.04);
 }
 
 .batch-table td{
@@ -329,12 +335,12 @@
 
 .badge-real{
     background:rgba(34,197,86,.15);
-    color:#22c55e;
+    color:var(--success);
 }
 
 .badge-fake{
-    background:rgba(193,18,31,.15);
-    color:#c1121f;
+    background:rgba(225,6,0,.15);
+    color:var(--red);
 }
 
 .badge-neutral{
@@ -423,7 +429,7 @@
 }
 
 .leader-card{
-    border:2px solid var(--text);
+    border:2px solid var(--red);
 }
 
 .model-rank{
@@ -443,7 +449,7 @@
 
 .model-not-loaded{
     margin-bottom:16px;
-    color:#b45309;
+    color:var(--yellow2);
     font-size:.85rem;
     font-weight:600;
 }

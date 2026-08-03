@@ -15,11 +15,12 @@
     padding:0 28px;
     display:flex;
     align-items:center;
-    background:var(--text);
-    color:var(--card);
+    background:var(--red);
+    color:#fff;
     font-weight:700;
     letter-spacing:2px;
     flex-shrink:0;
+    text-transform:uppercase;
 }
 
 .ticker-wrapper{
