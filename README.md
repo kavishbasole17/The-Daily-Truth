@@ -255,7 +255,7 @@ review_queue (id PK, article_id FK, verdict_id FK,
 
 | Person | Component |
 |--------|-----------|
-| A | Feature engineering + website frontend |
-| **B** | **ML models + agentic pipeline + website backend API** |
-| C | Origin/propagation tracing + mobile frontend |
-| D | Source credibility + analytics + mobile backend |
+| Phani Nishik Kalidindi | Feature engineering + website frontend |
+| Kavish Basole | **ML models + agentic pipeline + website backend API** |
+| Sashank Solasa | Origin/propagation tracing + mobile frontend |
+| Virat Tallapally | Source credibility + analytics + mobile backend |
