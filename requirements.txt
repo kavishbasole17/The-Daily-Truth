@@ -11,9 +11,20 @@ joblib>=1.2.0
 # ── Deep Learning (for LSTM/GRU/CNN models) ───────────────────────────────────
 tensorflow>=2.10.0         # optional — DL models load only if TF is present
 
-# ── NLI Verification (real mode only) ────────────────────────────────────────
-# torch>=2.0.0             # install separately for your platform
-# transformers>=4.35.0     # pip install transformers
+# ── NLI verification + evidence relevance (required by the agentic pipeline) ──
+# No longer optional: claim verification runs a real NLI model, and evidence
+# relevance gating uses sentence embeddings. Without these the pipeline falls
+# back to a word-overlap heuristic that cannot detect contradiction — it will
+# run, say so loudly in the degradation list, and refuse to commit to a verdict.
+#
+# Install torch for your platform first (https://pytorch.org/get-started/locally/);
+# the CUDA build is strongly preferred — NLI on GPU is ~10x faster and the
+# models fit comfortably in 4 GB.
+torch>=2.0.0
+transformers>=4.35.0
+sentence-transformers>=2.2.0
+sentencepiece>=0.1.99        # DeBERTa-v3 tokenizer
+protobuf>=3.20               # required by the sentencepiece tokenizer converter
 
 # ── Visualisation ─────────────────────────────────────────────────────────────
 matplotlib>=3.5.0

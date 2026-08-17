@@ -65,6 +65,7 @@ class ModelInfo(BaseModel):
     feature_type: str
     loaded: bool
     metrics: Optional[dict] = None
+    n_base_models: Optional[int] = None
 
 
 class ModelsListResponse(BaseModel):

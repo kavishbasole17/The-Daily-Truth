@@ -45,36 +45,3 @@
     line-height:1.8;
     color:var(--muted);
 }
-
-.health-widget{
-    width:max-content;
-    display:flex;
-    align-items:center;
-    gap:10px;
-    padding:12px 18px;
-    border-radius:4px;
-    margin:0 auto 60px;
-    background:var(--card);
-    border:1px solid var(--border);
-}
-
-.health-widget span{
-    width:10px;
-    height:10px;
-    border-radius:50%;
-}
-
-.health-widget.online span{
-    background:#22c55e;
-    box-shadow:0 0 12px #22c55e;
-}
-
-.health-widget.offline span{
-    background:#ef4444;
-    box-shadow:0 0 12px #ef4444;
-}
-
-.health-widget.checking span{
-    background:var(--yellow);
-    box-shadow:0 0 12px rgba(234,179,8,.4);
-}

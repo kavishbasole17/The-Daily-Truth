@@ -2,17 +2,23 @@
 LangGraph verification pipeline.
 
 Graph:
-    extract_claims
+    extract_claims        ← segment + rank check-worthy claims
          ↓
-    retrieve_evidence
+    retrieve_evidence     ← entity queries, relevance-gated, cached
          ↓
-    verify_claims      ← NLI per claim
+    verify_claims         ← NLI per (evidence sentence, claim) pair
          ↓
-    run_ensemble       ← stacking ensemble P(real)
+    run_ensemble          ← stacking ensemble P(real)
          ↓
-    adjudicate         ← combine → final verdict
+    adjudicate            ← calibrated fusion → verdict or abstention
          ↓
        END
+
+Every node runs behind a stage guard: a timeout and a defined fallback state.
+A stage that hangs or throws degrades that stage only, records why, and lets
+the rest of the pipeline finish — so a search provider going down produces an
+honest "couldn't verify, held for review" instead of a 500 or, worse, a
+confident verdict computed from nothing.
 
 Public API:
     run_verification_pipeline(article_text, url) -> VerdictResult
@@ -21,19 +27,127 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
-from typing import Optional
+import os
+import sys
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from dataclasses import dataclass, field
+from typing import Callable, Optional
 
 from langgraph.graph import END, StateGraph
 
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+try:
+    from config import settings
+    _STAGE_TIMEOUT = settings.STAGE_TIMEOUT_S
+except ImportError:  # pragma: no cover
+    _STAGE_TIMEOUT = 45.0
+
+from paper_trail_core.agents.adjudicator import adjudicate_node
 from paper_trail_core.agents.claim_extractor import extract_claims_node
 from paper_trail_core.agents.evidence_retriever import retrieve_evidence_node
-from paper_trail_core.agents.verifier import verify_claims_node
-from paper_trail_core.agents.stylistic_ensemble_agent import run_ensemble_node
-from paper_trail_core.agents.adjudicator import adjudicate_node
 from paper_trail_core.agents.state import ClaimVerdict, PipelineState
+from paper_trail_core.agents.stylistic_ensemble_agent import run_ensemble_node
+from paper_trail_core.agents.verifier import verify_claims_node
+from paper_trail_core.degradations import Degradation, degrade, summarise
 
 log = logging.getLogger(__name__)
+
+MIN_ARTICLE_CHARS = 40
+MAX_ARTICLE_CHARS = 50_000
+
+
+# ── Stage guard ────────────────────────────────────────────────────────────────
+
+def _fallback_claims(_state: PipelineState) -> dict:
+    return {"claims": []}
+
+
+def _fallback_evidence(state: PipelineState) -> dict:
+    return {
+        "evidence": [{"claim": c, "snippets": [], "status": "error"}
+                     for c in state.get("claims", [])],
+        "retrieval_stats": {},
+    }
+
+
+def _fallback_verify(state: PipelineState) -> dict:
+    return {
+        "claim_verdicts": [
+            ClaimVerdict(claim=item.get("claim", ""), verdict="unverifiable",
+                         confidence=0.0, evidence_snippets=[], support=0.0,
+                         entail_mass=0.0, contradict_mass=0.0, top_relevance=0.0,
+                         numeric_conflict=0.0, sources=[], status="error")
+            for item in state.get("evidence", [])
+        ],
+        "nli_degraded": True,
+    }
+
+
+def _fallback_ensemble(_state: PipelineState) -> dict:
+    return {"ensemble_score": 0.5}
+
+
+def _fallback_adjudicate(_state: PipelineState) -> dict:
+    return {
+        "final_verdict": "uncertain",
+        "final_confidence": 0.0,
+        "fused_score": 0.5,
+        "fusion_features": {},
+        "fusion_method": "failed",
+        "reasoning_trace": "Adjudication failed; verdict held for human review.",
+        "needs_human_review": True,
+    }
+
+
+def with_stage_guard(
+    fn: Callable[[PipelineState], dict],
+    stage: str,
+    fallback: Callable[[PipelineState], dict],
+    timeout_s: float = _STAGE_TIMEOUT,
+) -> Callable[[PipelineState], dict]:
+    """
+    Wrap a node so it can never hang the request or propagate an exception.
+
+    Note on the timeout: Python cannot kill a running thread, so a timed-out
+    stage keeps executing in the background until it finishes on its own. That
+    is acceptable here because every stage is network- or GPU-bound and
+    self-terminating — nothing spins forever — and the alternative (a request
+    that blocks indefinitely) is worse.
+    """
+    def _wrapped(state: PipelineState) -> dict:
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(fn, state).result(timeout=timeout_s)
+        except FutureTimeout:
+            log.error("pipeline: stage %s timed out after %.0fs", stage, timeout_s)
+            out = dict(fallback(state))
+            out["degradations"] = degrade(
+                stage, "timeout",
+                f"The {stage} stage exceeded its {timeout_s:.0f}s budget and was "
+                "abandoned. Its contribution is missing from this verdict.",
+                severity="critical",
+            )
+            return out
+        except Exception as exc:
+            # Full exception detail goes to the server log only. The
+            # degradation record is persisted to the DB and served back by
+            # the unauthenticated GET /articles/{id} endpoint, so it must
+            # never carry raw exception text — that can include internal
+            # paths, provider error bodies, or (for the LLM claim-extraction
+            # backend) fragments of a misconfigured API key.
+            log.error("pipeline: stage %s failed — %s", stage, exc, exc_info=True)
+            out = dict(fallback(state))
+            out["degradations"] = degrade(
+                stage, "stage_error",
+                f"The {stage} stage failed unexpectedly ({type(exc).__name__}). "
+                "Its contribution is missing from this verdict.",
+                severity="critical",
+            )
+            return out
+    return _wrapped
 
 
 # ── Graph construction ─────────────────────────────────────────────────────────
@@ -41,11 +155,16 @@ log = logging.getLogger(__name__)
 def _build_graph() -> StateGraph:
     g = StateGraph(PipelineState)
 
-    g.add_node("extract_claims",    extract_claims_node)
-    g.add_node("retrieve_evidence", retrieve_evidence_node)
-    g.add_node("verify_claims",     verify_claims_node)
-    g.add_node("run_ensemble",      run_ensemble_node)
-    g.add_node("adjudicate",        adjudicate_node)
+    g.add_node("extract_claims",
+               with_stage_guard(extract_claims_node, "claim_extractor", _fallback_claims))
+    g.add_node("retrieve_evidence",
+               with_stage_guard(retrieve_evidence_node, "evidence_retriever", _fallback_evidence))
+    g.add_node("verify_claims",
+               with_stage_guard(verify_claims_node, "verifier", _fallback_verify))
+    g.add_node("run_ensemble",
+               with_stage_guard(run_ensemble_node, "ensemble", _fallback_ensemble))
+    g.add_node("adjudicate",
+               with_stage_guard(adjudicate_node, "adjudicator", _fallback_adjudicate))
 
     g.set_entry_point("extract_claims")
     g.add_edge("extract_claims",    "retrieve_evidence")
@@ -77,6 +196,11 @@ class VerdictResult:
     ensemble_score: float
     reasoning_trace: str
     needs_human_review: bool
+    fused_score: float = 0.5
+    fusion_method: str = "heuristic_fallback"
+    fusion_features: dict = field(default_factory=dict)
+    degradations: list[Degradation] = field(default_factory=list)
+    retrieval_stats: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -86,13 +210,29 @@ class VerdictResult:
             "ensemble_score":     self.ensemble_score,
             "reasoning_trace":    self.reasoning_trace,
             "needs_human_review": self.needs_human_review,
+            "fused_score":        self.fused_score,
+            "fusion_method":      self.fusion_method,
+            "fusion_features":    self.fusion_features,
+            "degradations":       list(self.degradations),
+            "retrieval_stats":    self.retrieval_stats,
         }
 
     def claim_verdicts_json(self) -> str:
         return json.dumps(list(self.claim_verdicts))
 
+    def degradations_json(self) -> str:
+        return json.dumps(list(self.degradations))
+
 
 # ── Entry point ────────────────────────────────────────────────────────────────
+
+def _guarded_result(verdict: str, trace: str, degradations: list[Degradation]) -> VerdictResult:
+    return VerdictResult(
+        verdict=verdict, confidence=0.0, claim_verdicts=[], ensemble_score=0.5,
+        reasoning_trace=trace, needs_human_review=True, fused_score=0.5,
+        fusion_method="not_run", degradations=degradations,
+    )
+
 
 def run_verification_pipeline(
     article_text: str,
@@ -101,44 +241,64 @@ def run_verification_pipeline(
     """
     Run the full multi-agent verification pipeline.
 
-    Args:
-        article_text: Raw news article text.
-        url:          Optional source URL (stored but not currently fetched).
-
-    Returns:
-        VerdictResult with verdict, confidence, claim-level breakdown, and reasoning.
+    Never raises and never returns a confident verdict it cannot justify: any
+    failure path yields `uncertain` with `needs_human_review=True` and a
+    populated degradation list explaining what went wrong.
     """
-    log.info("pipeline: starting (text_len=%d)", len(article_text))
+    text = (article_text or "").strip()
+    log.info("pipeline: starting (text_len=%d)", len(text))
+
+    # Input guards — reject before spending model time, with a real explanation.
+    if len(text) < MIN_ARTICLE_CHARS:
+        return _guarded_result(
+            "uncertain",
+            f"Article is too short to verify ({len(text)} characters; "
+            f"{MIN_ARTICLE_CHARS} required).",
+            degrade("pipeline", "text_too_short",
+                    f"Submitted text was {len(text)} characters.", severity="critical"),
+        )
+    if len(text) > MAX_ARTICLE_CHARS:
+        log.warning("pipeline: truncating %d chars to %d", len(text), MAX_ARTICLE_CHARS)
+        text = text[:MAX_ARTICLE_CHARS]
 
     initial_state: PipelineState = {
-        "article_text":      article_text,
+        "article_text":      text,
         "url":               url,
         "claims":            [],
         "evidence":          [],
+        "retrieval_stats":   {},
         "claim_verdicts":    [],
+        "nli_degraded":      False,
         "ensemble_score":    0.5,
         "final_verdict":     "uncertain",
         "final_confidence":  0.0,
+        "fused_score":       0.5,
+        "fusion_features":   {},
+        "fusion_method":     "heuristic_fallback",
         "reasoning_trace":   "",
-        "needs_human_review": False,
+        "needs_human_review": True,
+        "degradations":      [],
         "error":             None,
     }
 
     try:
         result_state = _get_app().invoke(initial_state)
     except Exception as exc:
+        # Stage guards mean this should be unreachable; if the graph machinery
+        # itself fails we still owe the caller a well-formed answer. As above,
+        # raw exception text never goes into a field the public, unauthenticated
+        # GET /articles/{id} endpoint returns — only the server log gets it.
         log.error("pipeline: unexpected error — %s", exc, exc_info=True)
-        return VerdictResult(
-            verdict="uncertain",
-            confidence=0.0,
-            claim_verdicts=[],
-            ensemble_score=0.5,
-            reasoning_trace=f"Pipeline error: {exc}",
-            needs_human_review=True,
+        return _guarded_result(
+            "uncertain",
+            "Verification could not be completed due to an internal error.",
+            degrade("pipeline", "pipeline_error",
+                    f"Unexpected error ({type(exc).__name__}).", severity="critical"),
         )
 
-    if result_state.get("error"):
-        log.warning("pipeline: completed with error: %s", result_state["error"])
+    degradations = result_state.get("degradations", [])
+    if degradations:
+        log.info("pipeline: completed with degradations %s", summarise(degradations))
 
     return VerdictResult(
         verdict=result_state.get("final_verdict", "uncertain"),
@@ -147,4 +307,9 @@ def run_verification_pipeline(
         ensemble_score=result_state.get("ensemble_score", 0.5),
         reasoning_trace=result_state.get("reasoning_trace", ""),
         needs_human_review=result_state.get("needs_human_review", True),
+        fused_score=result_state.get("fused_score", 0.5),
+        fusion_method=result_state.get("fusion_method", "heuristic_fallback"),
+        fusion_features=result_state.get("fusion_features", {}),
+        degradations=degradations,
+        retrieval_stats=result_state.get("retrieval_stats", {}),
     )

@@ -39,11 +39,6 @@ export default function Navbar() {
                     ))}
                 </div>
 
-                <div className="health">
-                    <span className="dot" />
-                    API Online
-                </div>
-
                 <ThemeToggle />
             </div>
         </nav>

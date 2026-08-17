@@ -370,12 +370,13 @@ class ModelRegistry:
                 (info.get('category') == 'Hybrid' and self.hybrid_meta_learner is not None)
             )
             out.append({
-                'name':         name,
-                'display_name': info.get('display_name', name),
-                'category':     info.get('category', ''),
-                'feature_type': info.get('feature_type', ''),
-                'loaded':       loaded,
-                'metrics':      info.get('metrics'),
+                'name':           name,
+                'display_name':   info.get('display_name', name),
+                'category':       info.get('category', ''),
+                'feature_type':   info.get('feature_type', ''),
+                'loaded':         loaded,
+                'metrics':        info.get('metrics'),
+                'n_base_models':  info.get('n_base_models'),
             })
         return out
 

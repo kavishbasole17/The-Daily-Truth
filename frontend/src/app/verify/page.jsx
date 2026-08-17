@@ -16,7 +16,7 @@ import ErrorState from "@/components/ErrorState";
 import EmptyState from "@/components/EmptyState";
 import Footer from "@/components/Footer";
 
-import { submitForVerification } from "@/services/api";
+import { verifyArticle } from "@/services/api";
 
 import "@/styles/pages.css";
 
@@ -30,11 +30,17 @@ const CLAIM_VERDICT_META = {
     entailment: { label: "SUPPORTED", className: "badge-real" },
     contradiction: { label: "CONTRADICTED", className: "badge-fake" },
     neutral: { label: "NO CLEAR SIGNAL", className: "badge-neutral" },
+    // Distinct from "neutral" on purpose. Neutral means we found evidence and
+    // it was inconclusive; unverifiable means we found nothing to check
+    // against. Collapsing the two is what previously let "no search results"
+    // masquerade as a signal about the article.
+    unverifiable: { label: "COULD NOT VERIFY", className: "badge-neutral" },
 };
 
 export default function VerifyPage() {
     const [article, setArticle] = useState("");
     const [loading, setLoading] = useState(false);
+    const [stage, setStage] = useState("");
     const [result, setResult] = useState(null);
     const [error, setError] = useState("");
 
@@ -45,17 +51,20 @@ export default function VerifyPage() {
             setLoading(true);
             setError("");
             setResult(null);
+            setStage("queued");
 
-            const { data } = await submitForVerification(article);
+            const data = await verifyArticle(article, { onStage: setStage });
             setResult(data);
         } catch (err) {
             setError(
                 err?.response?.data?.detail ||
                 err?.response?.data?.message ||
+                err?.message ||
                 "Failed to verify article."
             );
         } finally {
             setLoading(false);
+            setStage("");
         }
     };
 
@@ -66,7 +75,14 @@ export default function VerifyPage() {
         <>
             <Navbar />
 
-            <LoadingOverlay show={loading} />
+            <LoadingOverlay
+                show={loading}
+                message={
+                    stage === "queued"
+                        ? "Queued for verification..."
+                        : "Extracting claims and checking them against sources..."
+                }
+            />
 
             <section className="prediction-page section">
                 <div className="container">
@@ -88,7 +104,7 @@ export default function VerifyPage() {
 
                         <div className="prediction-controls">
                             <div />
-                            <NewspaperButton onClick={handleSubmit}>
+                            <NewspaperButton onClick={handleSubmit} disabled={loading}>
                                 VERIFY WITH EVIDENCE
                             </NewspaperButton>
                         </div>
@@ -109,6 +125,20 @@ export default function VerifyPage() {
                                     </p>
                                 )}
                             </div>
+
+                            {/* The pipeline reports every point at which it ran below full
+                                capability. Hiding these would make a degraded verdict look
+                                identical to a healthy one. */}
+                            {verdict.degradations?.length > 0 && (
+                                <div className="claim-trail">
+                                    <h3>Limitations affecting this verdict</h3>
+                                    <ul className="evidence-list">
+                                        {verdict.degradations.map((d, i) => (
+                                            <li key={i}>{d.detail}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
 
                             <div className="claim-trail">
                                 <h3>Claim-by-claim trail</h3>
@@ -132,9 +162,27 @@ export default function VerifyPage() {
                                             {cv.evidence_snippets.length > 0 && (
                                                 <ul className="evidence-list">
                                                     {cv.evidence_snippets.map((s, j) => (
-                                                        <li key={j}>{s}</li>
+                                                        <li key={j}>
+                                                            {/* `sources` is positionally parallel to
+                                                                `evidence_snippets` — showing where a
+                                                                snippet came from is the whole point
+                                                                of an evidence trail. */}
+                                                            {cv.sources?.[j] && (
+                                                                <span className="evidence-source">
+                                                                    {cv.sources[j]}
+                                                                </span>
+                                                            )}
+                                                            {s}
+                                                        </li>
                                                     ))}
                                                 </ul>
+                                            )}
+                                            {cv.verdict === "unverifiable" && (
+                                                <p className="muted">
+                                                    No source covering this claim was found. That is
+                                                    not evidence against it — recent, regional and
+                                                    non-English topics are often missed.
+                                                </p>
                                             )}
                                         </div>
                                     );

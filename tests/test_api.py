@@ -17,21 +17,32 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture(scope="module")
 def client():
-    """Return a TestClient backed by the FastAPI app with an in-memory SQLite DB."""
+    """Return a TestClient backed by the FastAPI app."""
     import os, sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-    # Use in-memory SQLite for tests
     with patch.dict("os.environ", {"DATABASE_URL": "sqlite:///./test_paper_trail.db"}):
+        # Skip transformer warmup — these tests exercise HTTP contracts and mock
+        # the pipeline out entirely, so loading a 370 MB NLI model would add
+        # tens of seconds for nothing.
+        from config import settings
+        settings.WARM_MODELS = False
+
         from api.main import app
-        from api.database import create_tables
+        from api.database import create_tables, engine
         create_tables()
         with TestClient(app, raise_server_exceptions=True) as c:
             yield c
 
-    # Clean up test DB
+    # SQLite keeps the file handle open until the engine's connection pool is
+    # disposed; on Windows that makes the unlink fail outright rather than
+    # deferring it as POSIX would.
+    engine.dispose()
     if os.path.exists("test_paper_trail.db"):
-        os.remove("test_paper_trail.db")
+        try:
+            os.remove("test_paper_trail.db")
+        except OSError:
+            pass  # a leftover test DB is not worth failing the suite over
 
 
 # ── Auth fixtures ──────────────────────────────────────────────────────────────
@@ -146,18 +157,23 @@ def test_submit_and_retrieve_article(client, admin_token):
             headers={"Authorization": f"Bearer {admin_token}"},
         )
 
-    assert resp.status_code == 201
+    # Submission is asynchronous: 202 with no verdict attached yet.
+    assert resp.status_code == 202
     body = resp.json()
-    assert body["status"] == "completed"
-    assert body["verdict"]["verdict"] == "likely_real"
-    assert body["verdict"]["ensemble_score"] == pytest.approx(0.72, abs=1e-4)
-    assert body["verdict"]["needs_human_review"] is False
+    assert body["status"] == "processing"
+    assert body["verdict"] is None
 
-    # Retrieve by ID
+    # TestClient runs BackgroundTasks before returning, so the pipeline has
+    # already finished by the time we poll.
     article_id = body["id"]
     get_resp = client.get(f"/articles/{article_id}")
     assert get_resp.status_code == 200
-    assert get_resp.json()["id"] == article_id
+    done = get_resp.json()
+    assert done["id"] == article_id
+    assert done["status"] == "completed"
+    assert done["verdict"]["verdict"] == "likely_real"
+    assert done["verdict"]["ensemble_score"] == pytest.approx(0.72, abs=1e-4)
+    assert done["verdict"]["needs_human_review"] is False
 
 
 def test_get_article_not_found(client):
@@ -184,8 +200,12 @@ def test_submit_uncertain_creates_review_queue_item(client, admin_token):
             headers={"Authorization": f"Bearer {admin_token}"},
         )
 
-    assert resp.status_code == 201
-    assert resp.json()["verdict"]["needs_human_review"] is True
+    assert resp.status_code == 202
+    article_id = resp.json()["id"]
+
+    done = client.get(f"/articles/{article_id}").json()
+    assert done["status"] == "completed"
+    assert done["verdict"]["needs_human_review"] is True
 
     # Should appear in review queue
     rq_resp = client.get("/review-queue")
@@ -230,7 +250,7 @@ def test_resolve_queue_item(client, analyst_token, admin_token):
             json={"text": "Controversial claim that needs review."},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-    assert submit_resp.status_code == 201
+    assert submit_resp.status_code == 202
 
     # Find the queued item
     rq_resp = client.get("/review-queue?status=pending")
@@ -265,7 +285,7 @@ def test_resolve_already_resolved_returns_409(client, analyst_token, admin_token
             json={"text": "Another uncertain article for double-resolve test."},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-    assert submit_resp.status_code == 201
+    assert submit_resp.status_code == 202
 
     rq_resp = client.get("/review-queue?status=pending")
     items = rq_resp.json()["items"]

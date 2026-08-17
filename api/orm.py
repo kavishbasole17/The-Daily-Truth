@@ -28,6 +28,9 @@ class Article(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     # pending → processing → completed | failed
     status: Mapped[str] = mapped_column(String(32), default="pending")
+    # Current pipeline stage while status == "processing", so the polling UI can
+    # show progress rather than an opaque spinner.
+    stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
     submitted_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, server_default=func.now()
     )
@@ -53,6 +56,11 @@ class Verdict(Base):
     ensemble_score: Mapped[float] = mapped_column(Float, nullable=False)
     reasoning_trace: Mapped[str] = mapped_column(Text, nullable=False)
     needs_human_review: Mapped[bool] = mapped_column(Boolean, default=False)
+    # JSON-encoded list of Degradation dicts — records every point at which the
+    # pipeline ran below full capability for this verdict.
+    degradations: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Calibrated P(real) before thresholding, kept for calibration analysis.
+    fused_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     ai_model_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, server_default=func.now()

@@ -46,7 +46,12 @@ from api.schemas import (
     ResultsResponse, SinglePrediction,
 )
 from api.model_loader import ModelRegistry, clean_text
-from api.database import create_tables
+from api.database import create_tables, ensure_columns
+
+try:
+    from config import settings
+except ImportError:  # pragma: no cover
+    settings = None
 from api.routers import auth as auth_router
 from api.routers import articles as articles_router
 from api.routers import review_queue as rq_router
@@ -76,6 +81,7 @@ async def lifespan(app: FastAPI):
     # Initialise SQLite tables for article persistence
     try:
         create_tables()
+        ensure_columns()   # additive columns on an existing paper_trail.db
         logger.info('Database tables initialised.')
     except Exception as e:
         logger.error(f'Failed to create DB tables: {e}')
@@ -94,6 +100,26 @@ async def lifespan(app: FastAPI):
             'API will start but /predict endpoints will fail until '
             'export_models.py is run.'
         )
+
+    # Warm the verification pipeline's transformer singletons.
+    #
+    # Loading the NLI model and sentence encoder takes tens of seconds the
+    # first time. Paying that during startup rather than inside the first
+    # user's request keeps per-article latency in the seconds range, which is
+    # what the polling UI is sized for.
+    if getattr(settings, 'WARM_MODELS', True):
+        try:
+            from paper_trail_core.nlp import embeddings as _emb
+            from paper_trail_core.nlp import nli as _nli
+            logger.info('Warming verification models (NLI + embeddings)...')
+            _nli.warmup()
+            _emb.warmup()
+            logger.info('Verification models ready.')
+        except Exception as e:
+            logger.warning(
+                f'Could not warm verification models: {e}. The pipeline will '
+                'load them on first use, or degrade and say so.'
+            )
     yield
 
 

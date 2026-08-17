@@ -402,6 +402,22 @@
     line-height:1.6;
 }
 
+/* Source attribution on each retrieved snippet — the "receipts" the page
+   promises. Reads as a label so the snippet text stays the primary content. */
+.evidence-source{
+    display:inline-block;
+    margin-right:8px;
+    padding:1px 7px;
+    border-radius:3px;
+    background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.12);
+    color:var(--text);
+    font-size:.75rem;
+    font-weight:600;
+    letter-spacing:.02em;
+    vertical-align:baseline;
+}
+
 .reasoning-trace{
     margin-top:24px;
 }
@@ -452,6 +468,13 @@
     color:var(--yellow2);
     font-size:.85rem;
     font-weight:600;
+}
+
+.model-no-benchmark{
+    color:var(--muted);
+    font-size:.85rem;
+    line-height:1.5;
+    margin:0;
 }
 
 .model-metrics{

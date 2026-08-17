@@ -72,7 +72,7 @@ export default function ConsensusPage() {
             />
 
                         <div className="prediction-controls">
-                            <NewspaperButton onClick={handleSubmit}>
+                            <NewspaperButton onClick={handleSubmit} disabled={loading}>
                                 ANALYZE CONSENSUS
                             </NewspaperButton>
                         </div>

@@ -298,5 +298,38 @@
       "f1": 0.828154449608541,
       "auc": 0.922750309577563
     }
+  },
+  "hybrid_stacking": {
+    "display_name": "Hybrid Stacking (LR)",
+    "category": "Hybrid",
+    "feature_type": "hybrid",
+    "path": "models/hybrid/stacking_lr.joblib",
+    "train_time": 0.0,
+    "metrics": {},
+    "n_base_models": 22,
+    "base_model_names": [
+      "logistic_regression",
+      "multinomial_nb",
+      "bernoulli_nb",
+      "complement_nb",
+      "linear_svm",
+      "decision_tree",
+      "random_forest",
+      "extra_trees",
+      "adaboost",
+      "ridge_classifier",
+      "sgd_classifier",
+      "passive_aggressive",
+      "perceptron",
+      "mlp_classifier",
+      "knn",
+      "gradient_boosting",
+      "lightgbm",
+      "catboost",
+      "lstm",
+      "gru",
+      "cnn",
+      "cnn_lstm"
+    ]
   }
 }

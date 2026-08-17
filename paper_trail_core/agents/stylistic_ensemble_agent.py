@@ -20,11 +20,12 @@ if _ROOT not in sys.path:
 
 try:
     from config import settings
-    _MOCK = settings.ENSEMBLE_MOCK_MODE
+    _MOCK = settings.ENSEMBLE_BACKEND == "mock"
 except ImportError:
     _MOCK = False
 
 from paper_trail_core.agents.state import PipelineState
+from paper_trail_core.degradations import degrade
 
 log = logging.getLogger(__name__)
 
@@ -54,21 +55,35 @@ def run_ensemble_node(state: PipelineState) -> dict:
     log.info("ensemble_agent: running (mock=%s)", _MOCK)
 
     if _MOCK:
-        # Neutral baseline — adjudicator will refine via NLI signal
-        return {"ensemble_score": 0.5}
+        # Neutral baseline — adjudicator will refine via the evidence signal.
+        return {"ensemble_score": 0.5, "degradations": []}
 
     registry = _get_registry()
     if registry is None or registry.hybrid_count == 0:
         log.warning("ensemble_agent: hybrid model unavailable, using 0.5 fallback")
-        return {"ensemble_score": 0.5}
+        return {
+            "ensemble_score": 0.5,
+            "degradations": degrade(
+                "ensemble", "model_missing",
+                "The stacking ensemble could not be loaded; its contribution was "
+                "replaced with a neutral 0.5. Run export_models.py to train it.",
+            ),
+        }
 
     try:
-        from api.model_loader import clean_text
-        cleaned = clean_text(text)
-        result = registry._predict_hybrid(cleaned, "hybrid_stacking", threshold=0.5)
+        # `predict` applies clean_text itself (api/model_loader.py), so the text
+        # is passed raw — pre-cleaning here would clean it twice.
+        result = registry.predict(text, "hybrid_stacking", threshold=0.5)
         score = round(result["prob_real"], 4)
         log.info("ensemble_agent: ensemble_score=%.4f", score)
-        return {"ensemble_score": score}
+        return {"ensemble_score": score, "degradations": []}
     except Exception as exc:
         log.error("ensemble_agent: prediction failed (%s), falling back to 0.5", exc)
-        return {"ensemble_score": 0.5}
+        return {
+            "ensemble_score": 0.5,
+            "degradations": degrade(
+                "ensemble", "predict_failed",
+                f"Ensemble prediction failed ({type(exc).__name__}); used a "
+                "neutral 0.5 instead.",
+            ),
+        }

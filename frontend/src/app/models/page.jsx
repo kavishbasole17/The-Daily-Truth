@@ -54,6 +54,9 @@ export default function ModelsPage() {
 
     const pct = (v) => (typeof v === "number" ? `${(v * 100).toFixed(1)}%` : "N/A");
 
+    const hasMetrics = (model) =>
+        model.metrics && Object.values(model.metrics).some(v => typeof v === "number");
+
     return (
         <>
             <Navbar />
@@ -101,36 +104,44 @@ export default function ModelsPage() {
                                         <p className="model-not-loaded">Not loaded on this server</p>
                                     )}
 
-                                    <div className="model-metrics">
-                                        <div>
-                                            <span>Accuracy</span>
-                                            <strong>{pct(model.metrics?.accuracy)}</strong>
-                                        </div>
+                                    {hasMetrics(model) ? (
+                                        <div className="model-metrics">
+                                            <div>
+                                                <span>Accuracy</span>
+                                                <strong>{pct(model.metrics?.accuracy)}</strong>
+                                            </div>
 
-                                        <div>
-                                            <span>F1 Score</span>
-                                            <strong>{pct(model.metrics?.f1)}</strong>
-                                        </div>
+                                            <div>
+                                                <span>F1 Score</span>
+                                                <strong>{pct(model.metrics?.f1)}</strong>
+                                            </div>
 
-                                        <div>
-                                            <span>Precision</span>
-                                            <strong>{pct(model.metrics?.precision)}</strong>
-                                        </div>
+                                            <div>
+                                                <span>Precision</span>
+                                                <strong>{pct(model.metrics?.precision)}</strong>
+                                            </div>
 
-                                        <div>
-                                            <span>Recall</span>
-                                            <strong>{pct(model.metrics?.recall)}</strong>
-                                        </div>
+                                            <div>
+                                                <span>Recall</span>
+                                                <strong>{pct(model.metrics?.recall)}</strong>
+                                            </div>
 
-                                        <div>
-                                            <span>AUC</span>
-                                            <strong>
-                                                {typeof model.metrics?.auc === "number"
-                                                    ? model.metrics.auc.toFixed(4)
-                                                    : "N/A"}
-                                            </strong>
+                                            <div>
+                                                <span>AUC</span>
+                                                <strong>
+                                                    {typeof model.metrics?.auc === "number"
+                                                        ? model.metrics.auc.toFixed(4)
+                                                        : "N/A"}
+                                                </strong>
+                                            </div>
                                         </div>
-                                    </div>
+                                    ) : (
+                                        <p className="model-no-benchmark">
+                                            {model.n_base_models
+                                                ? `Meta-ensemble over ${model.n_base_models} base models — not yet independently benchmarked.`
+                                                : "Not yet independently benchmarked."}
+                                        </p>
+                                    )}
                                 </div>
                             ))}
                         </div>

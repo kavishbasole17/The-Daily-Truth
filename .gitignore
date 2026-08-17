@@ -18,6 +18,13 @@ venv/
 .env.example
 catboost_info/
 
+# Retrieved-evidence cache. Regenerable and large; keeping it out of git avoids
+# committing thousands of small JSON files. Note it is what makes evaluation
+# runs replayable offline, so don't delete it casually — a rebuild costs
+# NewsAPI quota and a lot of wall time.
+cache/
+results/eval_cache/
+
 # Frontend
 frontend/node_modules/
 frontend/.next/

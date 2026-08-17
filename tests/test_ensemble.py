@@ -73,32 +73,57 @@ def test_real_mode_fallback_when_registry_unavailable():
 
 
 def test_real_mode_uses_registry_when_available():
-    """When the registry is available, should call _predict_hybrid."""
     mock_registry = MagicMock()
     mock_registry.hybrid_count = 1
-    mock_registry._predict_hybrid.return_value = {"prob_real": 0.73}
+    mock_registry.predict.return_value = {"prob_real": 0.73}
 
     with patch("paper_trail_core.agents.stylistic_ensemble_agent._MOCK", False), \
          patch("paper_trail_core.agents.stylistic_ensemble_agent._registry", mock_registry), \
          patch("paper_trail_core.agents.stylistic_ensemble_agent._get_registry",
-               return_value=mock_registry), \
-         patch("api.model_loader.clean_text", return_value="cleaned text"):
+               return_value=mock_registry):
         from paper_trail_core.agents.stylistic_ensemble_agent import run_ensemble_node
         result = run_ensemble_node(_make_state())
         assert result["ensemble_score"] == pytest.approx(0.73, abs=1e-4)
 
 
-def test_real_mode_exception_falls_back_to_half():
-    """Exception during prediction should not crash — returns 0.5."""
+def test_uses_the_public_predict_api():
+    """
+    Guards against reaching back into `_predict_hybrid`.
+
+    The agent used to call that private method because models/registry.json was
+    missing its `hybrid_stacking` entry, so the public `predict()` raised
+    KeyError. The registry is fixed; this keeps the workaround from creeping
+    back and silently coupling the agent to ModelRegistry internals.
+    """
     mock_registry = MagicMock()
     mock_registry.hybrid_count = 1
-    mock_registry._predict_hybrid.side_effect = RuntimeError("model corrupt")
+    mock_registry.predict.return_value = {"prob_real": 0.61}
 
     with patch("paper_trail_core.agents.stylistic_ensemble_agent._MOCK", False), \
          patch("paper_trail_core.agents.stylistic_ensemble_agent._registry", mock_registry), \
          patch("paper_trail_core.agents.stylistic_ensemble_agent._get_registry",
-               return_value=mock_registry), \
-         patch("api.model_loader.clean_text", return_value="cleaned text"):
+               return_value=mock_registry):
+        from paper_trail_core.agents.stylistic_ensemble_agent import run_ensemble_node
+        run_ensemble_node(_make_state())
+
+    mock_registry.predict.assert_called_once()
+    mock_registry._predict_hybrid.assert_not_called()
+    # predict() cleans the text itself, so passing pre-cleaned text would
+    # double-clean it. The raw article must go through untouched.
+    assert mock_registry.predict.call_args.args[1] == "hybrid_stacking"
+
+
+def test_real_mode_exception_falls_back_to_half():
+    """Exception during prediction should not crash — returns 0.5 plus a degradation."""
+    mock_registry = MagicMock()
+    mock_registry.hybrid_count = 1
+    mock_registry.predict.side_effect = RuntimeError("model corrupt")
+
+    with patch("paper_trail_core.agents.stylistic_ensemble_agent._MOCK", False), \
+         patch("paper_trail_core.agents.stylistic_ensemble_agent._registry", mock_registry), \
+         patch("paper_trail_core.agents.stylistic_ensemble_agent._get_registry",
+               return_value=mock_registry):
         from paper_trail_core.agents.stylistic_ensemble_agent import run_ensemble_node
         result = run_ensemble_node(_make_state())
         assert result["ensemble_score"] == 0.5
+        assert any(d["kind"] == "predict_failed" for d in result["degradations"])

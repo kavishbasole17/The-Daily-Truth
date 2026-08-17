@@ -102,7 +102,7 @@ export default function SinglePredictionPage() {
                                 />
                             )}
 
-                            <NewspaperButton onClick={handleSubmit}>
+                            <NewspaperButton onClick={handleSubmit} disabled={loading}>
                                 VERIFY ARTICLE
                             </NewspaperButton>
                         </div>

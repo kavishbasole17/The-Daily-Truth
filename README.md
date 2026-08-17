@@ -9,13 +9,20 @@ article persistence, JWT auth, and a human review queue.
 capstone-final/
 ├── paper_trail_core/          # ML/agentic core (Person B)
 │   ├── agents/                # LangGraph pipeline nodes
-│   │   ├── state.py           # Shared TypedDict state
-│   │   ├── claim_extractor.py # LLM claim extraction
-│   │   ├── evidence_retriever.py # Web search per claim
-│   │   ├── verifier.py        # NLI (facebook/bart-large-mnli)
+│   │   ├── state.py           # Shared TypedDict state (+ degradation reducer)
+│   │   ├── claim_extractor.py # Check-worthy claim selection (local, no LLM)
+│   │   ├── evidence_retriever.py # Entity queries + relevance-gated retrieval
+│   │   ├── evidence_cache.py  # On-disk search cache (determinism, quota)
+│   │   ├── sources.py         # Source trust tiers
+│   │   ├── verifier.py        # NLI (DeBERTa-v3-mnli-fever-anli) + aggregation
 │   │   ├── stylistic_ensemble_agent.py  # Stacking ensemble
-│   │   ├── adjudicator.py     # Final weighted verdict
-│   │   └── pipeline.py        # LangGraph StateGraph wiring
+│   │   ├── features.py        # Frozen fusion feature vector
+│   │   ├── fusion.py          # Calibrated fusion + heuristic fallback
+│   │   ├── adjudicator.py     # Verdict, abstention, reasoning trace
+│   │   └── pipeline.py        # LangGraph wiring + per-stage guards
+│   ├── nlp/                   # Segmentation, check-worthiness, NLI, embeddings
+│   ├── eval/                  # Leak-free splits + metrics
+│   ├── degradations.py        # Structured "we ran below full capability"
 │   └── registry/
 │       ├── store.py           # Read queries against registry.json
 │       └── cli.py             # Command-line registry browser
@@ -37,11 +44,20 @@ capstone-final/
 ├── results/                   # CSV + PNG benchmark outputs
 ├── notebooks/                 # Algorithm-specific EDA notebooks
 ├── tests/                     # pytest suite
+├── scripts/
+│   ├── evaluate_pipeline.py   # End-to-end evaluation harness
+│   ├── train_fusion.py        # Fit the calibrated adjudicator
+│   └── rebuild_registry.py    # Repair models/registry.json metadata
+├── docs/
+│   └── VERIFICATION_PIPELINE.md  # How the pipeline works, and its limits
 ├── export_models.py           # Train + save all 20+ models
 ├── preprocess.py              # Dataset loaders + text cleaning
 ├── config.py                  # Centralised settings (pydantic-settings)
 └── requirements.txt
 ```
+
+See **[docs/VERIFICATION_PIPELINE.md](docs/VERIFICATION_PIPELINE.md)** for how the
+agentic pipeline works, how it is evaluated, and what it cannot do.
 
 ## Quick start
 
@@ -51,17 +67,25 @@ capstone-final/
 pip install -r requirements.txt
 ```
 
-For GPU-accelerated NLI verification (real mode only):
-```bash
-pip install torch transformers
-```
+`torch`, `transformers` and `sentence-transformers` are required, not optional —
+claim verification runs a real NLI model and evidence relevance gating uses
+sentence embeddings. Install torch for your platform first
+(https://pytorch.org/get-started/locally/); the CUDA build is strongly
+preferred. Without them the pipeline still runs, but it degrades to word-overlap
+matching, says so in the response, and refuses to commit to a verdict.
+
+The NLI model (~370 MB) downloads on first use.
 
 ### 2. Configure environment
 
 ```bash
 cp .env.example .env
-# Edit .env — MOCK_MODE=true requires no API keys (default for dev)
 ```
+
+No API keys are required. Claim extraction is fully local, and evidence
+retrieval works against Wikipedia without a key. Setting `NEWS_API_KEY`
+additionally searches trusted news outlets (newsapi.org's free tier: 100
+requests/day, English, ~1-month window).
 
 ### 3. Train models (run once)
 
@@ -134,24 +158,49 @@ curl -X POST http://localhost:8000/articles/submit \
 
 ## Agentic pipeline
 
-LangGraph StateGraph — five sequential nodes:
+LangGraph StateGraph — five sequential nodes, each behind a timeout and a
+defined fallback:
 
 ```
 extract_claims → retrieve_evidence → verify_claims → run_ensemble → adjudicate
 ```
 
-| Node | Mock mode | Real mode |
-|------|-----------|-----------|
-| `extract_claims` | Heuristic sampling | Anthropic / OpenAI API |
-| `retrieve_evidence` | Canned snippets | Tavily / SerpAPI |
-| `verify_claims` | Keyword heuristic | facebook/bart-large-mnli |
-| `run_ensemble` | 0.5 (neutral) | Stacking ensemble (LR meta-learner) |
-| `adjudicate` | Pure computation | Pure computation |
+| Node | What it does | Backend flag |
+|------|--------------|--------------|
+| `extract_claims` | Segments sentences, ranks by check-worthiness | `CLAIM_BACKEND` (`heuristic`) |
+| `retrieve_evidence` | Entity queries → NewsAPI + Wikipedia, relevance-gated, cached | `EVIDENCE_BACKEND` (`live`) |
+| `verify_claims` | NLI over (evidence sentence, claim) pairs | `NLI_BACKEND` (`transformer`) |
+| `run_ensemble` | Stacking ensemble P(real) — one feature, not the verdict | `ENSEMBLE_BACKEND` (`real`) |
+| `adjudicate` | Calibrated fusion → verdict or abstention | — |
 
-**Escalation:** score in [0.4, 0.6] → `uncertain` verdict + `needs_human_review=true`
-→ article auto-added to review queue.
+Each stage names its own backend. The old single `MOCK_MODE` flag gated two
+unrelated stages at once and defaulted to on, so the pipeline silently ran
+word-overlap matching in place of NLI. Setting `MOCK_MODE=true` still works and
+maps onto the degraded backends, but it is deprecated and the pipeline will
+report it as a critical degradation.
 
-Set `MOCK_MODE=false` in `.env` and supply API keys to use real mode.
+**Abstention:** when the fused score falls inside the abstention band — or when
+NLI ran degraded, or no claim could be checked at all — the verdict is
+`uncertain`, `needs_human_review=true`, and the article is added to the review
+queue. Band edges are chosen on held-out data to hold a target precision.
+
+**Submission is asynchronous.** `POST /articles/submit` returns **202** with
+`status="processing"`; poll `GET /articles/{id}` until `completed` or `failed`.
+
+Full detail, including the measured limitations, is in
+[docs/VERIFICATION_PIPELINE.md](docs/VERIFICATION_PIPELINE.md).
+
+### Evaluating it
+
+```bash
+py scripts/evaluate_pipeline.py --slice golden                    # novel articles
+py scripts/evaluate_pipeline.py --slice holdout --n-per-class 150 # leak-free split
+py scripts/train_fusion.py --input results/eval_per_article_holdout.csv
+```
+
+Reports land in `results/` with accuracy, per-class precision/recall,
+calibration (ECE), a coverage-vs-precision curve, and an
+ensemble-only / evidence-only / fused ablation.
 
 ---
 
@@ -171,8 +220,20 @@ python -m paper_trail_core.registry.cli top --n 3 --metric auc --category "Class
 pytest tests/ -v
 ```
 
-Uses an in-memory SQLite database; mocks the pipeline so no trained models or
-API keys are required.
+107 tests, all offline: retrieval is monkeypatched, NLI is stubbed, and the API
+tests mock the pipeline, so no trained models, GPU or API keys are required.
+
+Notable regression coverage:
+
+- `test_claim_extractor.py` — decimals must not be split (`6.75 percent` stays
+  one claim), and the preserved `naive` backend must still reproduce the bug so
+  the assertion cannot pass vacuously.
+- `test_verifier.py` — NLI labels are read from config, not position (the two
+  checkpoints used here order them inversely); a confident `neutral` must not
+  beat an `entailment`; absence of evidence must never yield `contradiction`.
+- `test_adjudicator.py` — degraded NLI and zero coverage both force abstention.
+- `test_pipeline_e2e.py` — the exact JSON contract the frontend dereferences
+  without null checks, including under total stage failure.
 
 ---
 

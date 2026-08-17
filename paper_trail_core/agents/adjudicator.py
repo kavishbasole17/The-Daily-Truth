@@ -1,42 +1,29 @@
 """
-Adjudicator agent node — pure computation, no external API calls.
+Adjudicator agent node — pure computation, no external calls.
 
-Combines two signals into a final verdict:
-  1. ensemble_score  — classical/hybrid model's P(real)
-  2. evidence_score  — derived from evidence-grounded claim verdicts
-                        (entailment/contradiction against trusted sources)
+Turns the feature vector into a final verdict, and decides when *not* to give
+one.
 
-Why evidence gets more weight than the ensemble
--------------------------------------------------
-The classical ensemble is a fast text-pattern classifier trained on a mostly
-static, dataset-specific corpus (see model benchmark notes). Empirically it's
-unreliable on well-written fabricated content: it keys on writing *style*
-(formal wire-service tone vs. tabloid tone) rather than truthfulness, so a
-fabricated article written in a formal register can score confidently "real"
-from the ensemble alone. Evidence-grounded claim verification — checking
-each claim against real trusted sources (see evidence_retriever.py) — is a
-substantially stronger signal when it has something informative to say.
+The abstention band is the point of this stage. A detector that must commit to
+every article ships confident errors; one that can say "uncertain" and route to
+a human keeps its committed verdicts trustworthy. The band's edges are chosen
+on held-out data to hold a target precision (config.TARGET_PRECISION), and the
+coverage that costs is measured and reported rather than hidden.
 
-So: when evidence retrieval found at least one claim it could meaningfully
-corroborate or contradict, evidence dominates the final score. When nothing
-informative came back (e.g. all claims neutral — evidence too vague, or claim
-extraction found nothing to check), we fall back to trusting the ensemble.
-
-Output schema:
-  {
-    "verdict":            "likely_fake" | "likely_real" | "uncertain",
-    "confidence":         float (0-1),
-    "ensemble_score":     float,
-    "claim_verdicts":     [...],
-    "reasoning_trace":    str,
-    "needs_human_review": bool,
-  }
+Two hard gates force abstention regardless of score:
+  * NLI ran degraded — the fallback verifier cannot detect contradiction and
+    has historically scored refutations as support, so its output must never
+    reach a committed verdict.
+  * No claim could be checked at all — then the only remaining signal is the
+    style classifier, which on novel text is roughly a coin flip weighted
+    toward "real".
 """
 from __future__ import annotations
 
 import logging
 import os
 import sys
+from typing import Any, Optional
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
@@ -46,145 +33,195 @@ try:
     from config import settings
     _LOW  = settings.ESCALATION_LOW
     _HIGH = settings.ESCALATION_HIGH
-except ImportError:
+except ImportError:  # pragma: no cover
     _LOW, _HIGH = 0.4, 0.6
 
+from paper_trail_core.agents import fusion
+from paper_trail_core.agents.features import build_features
 from paper_trail_core.agents.state import ClaimVerdict, PipelineState
+from paper_trail_core.degradations import degrade, format_degradations
 
 log = logging.getLogger(__name__)
 
-# Weight given to the classical ensemble when evidence retrieval found at
-# least one informative (non-neutral) claim verdict — evidence dominates.
-_W_ENSEMBLE_WITH_EVIDENCE = 0.15
-# Weight given to the ensemble when no informative evidence was found —
-# it's the only signal available, so it drives the verdict.
-_W_ENSEMBLE_NO_EVIDENCE = 0.8
+_SENTINEL = fusion.UNSET
 
 
-def _evidence_score(claim_verdicts: list[ClaimVerdict]) -> float:
+def _verdict_from_score(p_real: float, low: float, high: float) -> tuple[str, float]:
     """
-    Maps claim verdicts to a [0,1] "P(real) according to evidence" score.
-    0.5 is neutral/no-signal. Confident entailments pull toward 1, confident
-    contradictions pull toward 0. Neutral verdicts contribute nothing but
-    still dilute the average — more neutral claims means less decisive
-    evidence overall, which is the correct behavior.
+    Map a calibrated P(real) to a verdict and a confidence.
+
+    Confidence is the calibrated probability of the class actually reported —
+    not a distance-from-0.5 rescaling. The previous formula returned
+    `abs(score - 0.5) * 2 * 0.5`, capped at 0.1 inside the uncertain band, so
+    the UI displayed "10% Confidence" on literally every uncertain verdict.
+    Reporting "we're 58% leaning real, which isn't enough to commit" is both
+    honest and useful.
     """
-    if not claim_verdicts:
-        return 0.5
-    total = 0.0
-    for cv in claim_verdicts:
-        v, c = cv["verdict"], cv["confidence"]
-        if v == "entailment":
-            total += c
-        elif v == "contradiction":
-            total -= c
-        # neutral -> no contribution
-    avg = total / len(claim_verdicts)  # roughly in [-1, 1]
-    return max(0.0, min(1.0, 0.5 + avg / 2.0))
-
-
-def _ensemble_weight(claim_verdicts: list[ClaimVerdict]) -> float:
-    n_informative = sum(1 for cv in claim_verdicts if cv["verdict"] != "neutral")
-    return _W_ENSEMBLE_NO_EVIDENCE if n_informative == 0 else _W_ENSEMBLE_WITH_EVIDENCE
-
-
-def _combine(ensemble_score: float, claim_verdicts: list[ClaimVerdict]) -> tuple[float, float, float]:
-    """Returns (final_score, evidence_score, ensemble_weight_used)."""
-    ev_score = _evidence_score(claim_verdicts)
-    w = _ensemble_weight(claim_verdicts)
-    final_score = max(0.0, min(1.0, w * ensemble_score + (1 - w) * ev_score))
-    return final_score, ev_score, w
-
-
-def _verdict_from_score(final_score: float, low: float, high: float) -> tuple[str, float]:
-    if final_score >= high:
-        return "likely_real", round(final_score, 4)
-    if final_score <= low:
-        return "likely_fake", round(1.0 - final_score, 4)
-    return "uncertain", round(abs(final_score - 0.5) * 2 * 0.5, 4)
+    if p_real >= high:
+        return "likely_real", round(p_real, 4)
+    if p_real <= low:
+        return "likely_fake", round(1.0 - p_real, 4)
+    return "uncertain", round(max(p_real, 1.0 - p_real), 4)
 
 
 def _build_trace(
-    ensemble_score: float,
-    evidence_score: float,
-    ensemble_weight: float,
-    final_score: float,
+    features: dict[str, float],
+    p_real: float,
+    method: str,
     verdict: str,
+    confidence: float,
     claim_verdicts: list[ClaimVerdict],
+    low: float,
+    high: float,
+    degradations: list,
+    forced_reason: Optional[str] = None,
 ) -> str:
-    n_ent = sum(1 for v in claim_verdicts if v["verdict"] == "entailment")
-    n_con = sum(1 for v in claim_verdicts if v["verdict"] == "contradiction")
-    n_neu = sum(1 for v in claim_verdicts if v["verdict"] == "neutral")
+    n = {v: sum(1 for c in claim_verdicts if c.get("verdict") == v)
+         for v in ("entailment", "contradiction", "neutral", "unverifiable")}
 
     lines = [
-        f"Ensemble model probability of real news: {ensemble_score:.3f}",
-        f"Evidence-based score (from {n_ent} supporting, {n_con} contradicting, "
-        f"{n_neu} neutral claim verdicts): {evidence_score:.3f}",
-        f"Blend weights: ensemble={ensemble_weight:.2f}, evidence={1 - ensemble_weight:.2f} "
-        f"({'evidence found informative signal' if ensemble_weight < 0.5 else 'no informative evidence — trusting ensemble'})",
-        f"Combined score: {final_score:.3f}",
-        f"Final verdict: {verdict}",
+        "EVIDENCE SUMMARY",
+        f"  Claims checked            : {len(claim_verdicts)}",
+        f"  Supported by evidence     : {n['entailment']}",
+        f"  Contradicted by evidence  : {n['contradiction']}",
+        f"  Evidence inconclusive     : {n['neutral']}",
+        f"  Could not be checked      : {n['unverifiable']}",
+        f"  Evidence coverage         : {features.get('coverage', 0.0):.0%} of claims",
+        f"  Mean evidence relevance   : {features.get('mean_relevance', 0.0):.3f}",
+        f"  Mean source trust         : {features.get('mean_trust', 0.0):.3f}",
+        "",
+        "SCORING",
+        f"  Style-classifier P(real)  : {features.get('ensemble_score', 0.5):.3f}",
+        f"  Mean claim support        : {features.get('mean_support', 0.0):+.3f}  (-1 refuted .. +1 supported)",
+        f"  Strongest refutation      : {features.get('min_support', 0.0):+.3f}",
+        f"  Fusion method             : {method}",
+        f"  Combined P(real)          : {p_real:.3f}",
+        f"  Abstention band           : {low:.3f} .. {high:.3f}",
+        "",
+        f"VERDICT: {verdict}  (confidence {confidence:.1%})",
     ]
 
+    if forced_reason:
+        lines.append(f"  Held for review: {forced_reason}")
+
     if claim_verdicts:
-        lines.append("Claim-level breakdown:")
+        lines += ["", "CLAIM-BY-CLAIM"]
         for cv in claim_verdicts:
+            tag = cv.get("verdict", "?").upper()[:6].ljust(6)
+            src = ", ".join(dict.fromkeys(s for s in cv.get("sources", []) if s)) or "no source"
             lines.append(
-                f"  [{cv['verdict'].upper()[:3]} {cv['confidence']:.2f}] {cv['claim'][:80]}"
+                f"  [{tag} {cv.get('confidence', 0.0):.2f}] {cv.get('claim', '')[:96]}"
+            )
+            lines.append(
+                f"          support={cv.get('support', 0.0):+.2f} "
+                f"relevance={cv.get('top_relevance', 0.0):.2f} via {src[:70]}"
             )
 
-    return "\n".join(lines)
+    trace = "\n".join(lines)
+    return trace + format_degradations(degradations)
 
-
-def adjudicate_node(state: PipelineState) -> dict:
-    """LangGraph node: combine evidence-grounded claim verdicts + ensemble score."""
-    ensemble_score = state.get("ensemble_score", 0.5)
-    claim_verdicts = state.get("claim_verdicts", [])
-
-    log.info(
-        "adjudicator: ensemble=%.3f, %d claim verdicts",
-        ensemble_score,
-        len(claim_verdicts),
-    )
-
-    final_score, ev_score, w = _combine(ensemble_score, claim_verdicts)
-    verdict, confidence = _verdict_from_score(final_score, _LOW, _HIGH)
-    needs_human_review = verdict == "uncertain"
-
-    reasoning_trace = _build_trace(
-        ensemble_score, ev_score, w, final_score, verdict, claim_verdicts
-    )
-
-    log.info(
-        "adjudicator: verdict=%s conf=%.4f human_review=%s",
-        verdict,
-        confidence,
-        needs_human_review,
-    )
-
-    return {
-        "final_verdict":      verdict,
-        "final_confidence":   confidence,
-        "reasoning_trace":    reasoning_trace,
-        "needs_human_review": needs_human_review,
-    }
-
-
-# ── Public helper (used by tests) ──────────────────────────────────────────────
 
 def compute_verdict(
     ensemble_score: float,
     claim_verdicts: list[ClaimVerdict],
-    escalation_low: float = _LOW,
-    escalation_high: float = _HIGH,
+    retrieval_stats: Optional[dict] = None,
+    nli_degraded: bool = False,
+    fusion_payload: Any = _SENTINEL,
+    escalation_low: Optional[float] = None,
+    escalation_high: Optional[float] = None,
 ) -> dict:
-    """Pure-function wrapper for unit tests — no LangGraph state required."""
-    final_score, _ev_score, _w = _combine(ensemble_score, claim_verdicts)
-    verdict, confidence = _verdict_from_score(final_score, escalation_low, escalation_high)
+    """
+    Pure function: signals in, verdict out. No LangGraph state, no I/O.
+
+    Pass `fusion_payload=None` to force the deterministic heuristic path —
+    that's what the unit tests do, so they don't depend on whether a fusion
+    model happens to be trained on the machine running them.
+    """
+    payload = fusion.load_fusion() if fusion_payload is _SENTINEL else fusion_payload
+
+    features = build_features(ensemble_score, claim_verdicts, retrieval_stats, nli_degraded)
+    p_real, method = fusion.fused_probability(features, payload)
+
+    t_low, t_high = fusion.thresholds(payload)
+    low = t_low if escalation_low is None else escalation_low
+    high = t_high if escalation_high is None else escalation_high
+
+    verdict, confidence = _verdict_from_score(p_real, low, high)
+
+    # Hard gates — abstain regardless of the score.
+    forced_reason = None
+    if nli_degraded:
+        forced_reason = (
+            "claim checking ran on the degraded word-overlap backend, which "
+            "cannot reliably detect contradiction"
+        )
+    elif features["coverage"] == 0.0 and claim_verdicts:
+        forced_reason = "no claim could be checked against any source"
+
+    if forced_reason and verdict != "uncertain":
+        verdict = "uncertain"
+        confidence = round(max(p_real, 1.0 - p_real), 4)
 
     return {
-        "verdict":            verdict,
-        "confidence":         confidence,
-        "final_score":        round(final_score, 4),
+        "verdict": verdict,
+        "confidence": confidence,
+        "final_score": round(p_real, 4),
+        "fused_score": round(p_real, 4),
+        "fusion_method": method,
+        "features": features,
         "needs_human_review": verdict == "uncertain",
+        "forced_reason": forced_reason,
+        "thresholds": {"low": low, "high": high},
+    }
+
+
+def adjudicate_node(state: PipelineState) -> dict:
+    """LangGraph node: fuse all signals into the final verdict."""
+    ensemble_score = state.get("ensemble_score", 0.5)
+    claim_verdicts = state.get("claim_verdicts", [])
+    retrieval_stats = state.get("retrieval_stats", {})
+    nli_degraded = bool(state.get("nli_degraded", False))
+    prior_degradations = list(state.get("degradations", []))
+
+    result = compute_verdict(
+        ensemble_score, claim_verdicts, retrieval_stats, nli_degraded
+    )
+
+    new_degradations: list = []
+    if result["fusion_method"] == "heuristic_fallback":
+        new_degradations += degrade(
+            "adjudicator", "fusion_untrained",
+            "No trained fusion model was found, so the verdict used the "
+            "conservative hand-set blend. Run scripts/train_fusion.py to enable "
+            "the calibrated model.",
+            severity="info",
+        )
+    if result["forced_reason"]:
+        new_degradations += degrade(
+            "adjudicator", "forced_abstention",
+            f"Verdict held for human review: {result['forced_reason']}.",
+        )
+
+    trace = _build_trace(
+        result["features"], result["fused_score"], result["fusion_method"],
+        result["verdict"], result["confidence"], claim_verdicts,
+        result["thresholds"]["low"], result["thresholds"]["high"],
+        prior_degradations + new_degradations, result["forced_reason"],
+    )
+
+    log.info(
+        "adjudicator: verdict=%s conf=%.4f p_real=%.4f method=%s review=%s",
+        result["verdict"], result["confidence"], result["fused_score"],
+        result["fusion_method"], result["needs_human_review"],
+    )
+
+    return {
+        "final_verdict":      result["verdict"],
+        "final_confidence":   result["confidence"],
+        "fused_score":        result["fused_score"],
+        "fusion_features":    result["features"],
+        "fusion_method":      result["fusion_method"],
+        "reasoning_trace":    trace,
+        "needs_human_review": result["needs_human_review"],
+        "degradations":       new_degradations,
     }

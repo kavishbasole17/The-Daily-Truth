@@ -102,7 +102,7 @@ export default function BatchPage() {
                                 />
                             )}
 
-                            <NewspaperButton onClick={handleSubmit}>
+                            <NewspaperButton onClick={handleSubmit} disabled={loading}>
                                 ANALYZE BATCH
                             </NewspaperButton>
                         </div>
