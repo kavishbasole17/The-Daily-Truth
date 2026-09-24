@@ -4,13 +4,13 @@
     "category": "Classical ML",
     "feature_type": "tfidf",
     "path": "models/classical/logistic_regression.joblib",
-    "train_time": 3.64,
+    "train_time": 1.6,
     "metrics": {
-      "accuracy": 0.8287012676393207,
-      "f1": 0.8266640741824001,
-      "precision": 0.8287414776004915,
-      "recall": 0.8287012676393207,
-      "auc": 0.9182533452204449
+      "accuracy": 0.8260828086243084,
+      "f1": 0.8243275690615502,
+      "precision": 0.8257013520221157,
+      "recall": 0.8260828086243084,
+      "auc": 0.9167103541896947
     }
   },
   "multinomial_nb": {
@@ -18,13 +18,13 @@
     "category": "Classical ML",
     "feature_type": "tfidf",
     "path": "models/classical/multinomial_nb.joblib",
-    "train_time": 0.08,
+    "train_time": 0.07,
     "metrics": {
-      "accuracy": 0.7724467830662521,
-      "f1": 0.7732891619147325,
-      "precision": 0.7749061721517385,
-      "recall": 0.7724467830662521,
-      "auc": 0.8707444097099195
+      "accuracy": 0.7727532913566113,
+      "f1": 0.7734391298247931,
+      "precision": 0.7746146682540118,
+      "recall": 0.7727532913566113,
+      "auc": 0.8703604914715437
     }
   },
   "bernoulli_nb": {
@@ -32,13 +32,13 @@
     "category": "Classical ML",
     "feature_type": "tfidf",
     "path": "models/classical/bernoulli_nb.joblib",
-    "train_time": 0.17,
+    "train_time": 0.19,
     "metrics": {
-      "accuracy": 0.7304950968667783,
-      "f1": 0.7202924882952253,
-      "precision": 0.7315045906837733,
-      "recall": 0.7304950968667783,
-      "auc": 0.7245113825761818
+      "accuracy": 0.7320167906887999,
+      "f1": 0.7221309293622682,
+      "precision": 0.7329848594450991,
+      "recall": 0.7320167906887999,
+      "auc": 0.7301622058682655
     }
   },
   "complement_nb": {
@@ -48,11 +48,11 @@
     "path": "models/classical/complement_nb.joblib",
     "train_time": 0.07,
     "metrics": {
-      "accuracy": 0.7578091365701985,
-      "f1": 0.7598672537561724,
-      "precision": 0.775530993835965,
-      "recall": 0.7578091365701985,
-      "auc": 0.8697077828790205
+      "accuracy": 0.7590631558862813,
+      "f1": 0.7610972396238889,
+      "precision": 0.7744992527223149,
+      "recall": 0.7590631558862813,
+      "auc": 0.869352222239927
     }
   },
   "linear_svm": {
@@ -60,13 +60,13 @@
     "category": "Classical ML",
     "feature_type": "tfidf",
     "path": "models/classical/linear_svm.joblib",
-    "train_time": 4.62,
+    "train_time": 9.18,
     "metrics": {
-      "accuracy": 0.8242047357091605,
-      "f1": 0.8232239951335695,
-      "precision": 0.8233538071291979,
-      "recall": 0.8242047357091605,
-      "auc": 0.9107523910345898
+      "accuracy": 0.8226960503720664,
+      "f1": 0.8217462671922158,
+      "precision": 0.8218325557995033,
+      "recall": 0.8226960503720664,
+      "auc": 0.9104958487718202
     }
   },
   "decision_tree": {
@@ -74,13 +74,13 @@
     "category": "Classical ML",
     "feature_type": "tfidf",
     "path": "models/classical/decision_tree.joblib",
-    "train_time": 159.02,
+    "train_time": 227.88,
     "metrics": {
-      "accuracy": 0.8171729251375269,
-      "f1": 0.8144461683503227,
-      "precision": 0.8175871801757175,
-      "recall": 0.8171729251375269,
-      "auc": 0.8177816763653931
+      "accuracy": 0.8219328372448006,
+      "f1": 0.8191006098513482,
+      "precision": 0.8228492484631709,
+      "recall": 0.8219328372448006,
+      "auc": 0.8319865258223869
     }
   },
   "random_forest": {
@@ -88,13 +88,13 @@
     "category": "Classical ML",
     "feature_type": "tfidf",
     "path": "models/classical/random_forest.joblib",
-    "train_time": 81.55,
+    "train_time": 180.48,
     "metrics": {
-      "accuracy": 0.8335326476919397,
-      "f1": 0.8298619357509697,
-      "precision": 0.8373757600208523,
-      "recall": 0.8335326476919397,
-      "auc": 0.9108690947944855
+      "accuracy": 0.8353844686128601,
+      "f1": 0.8317149261902324,
+      "precision": 0.8394923717261523,
+      "recall": 0.8353844686128601,
+      "auc": 0.912211645867488
     }
   },
   "extra_trees": {
@@ -102,13 +102,13 @@
     "category": "Classical ML",
     "feature_type": "tfidf",
     "path": "models/classical/extra_trees.joblib",
-    "train_time": 114.85,
+    "train_time": 245.54,
     "metrics": {
-      "accuracy": 0.8349198756278402,
-      "f1": 0.8317926493301208,
-      "precision": 0.8374929977673534,
-      "recall": 0.8349198756278402,
-      "auc": 0.9091623023060095
+      "accuracy": 0.835766075176493,
+      "f1": 0.8328338121519201,
+      "precision": 0.8379771264564159,
+      "recall": 0.835766075176493,
+      "auc": 0.9092777259253308
     }
   },
   "adaboost": {
@@ -116,13 +116,13 @@
     "category": "Classical ML",
     "feature_type": "tfidf",
     "path": "models/classical/adaboost.joblib",
-    "train_time": 288.25,
+    "train_time": 363.22,
     "metrics": {
-      "accuracy": 0.775843099736905,
-      "f1": 0.7658126103595735,
-      "precision": 0.7854701087295809,
-      "recall": 0.775843099736905,
-      "auc": 0.851383094907173
+      "accuracy": 0.776426254531578,
+      "f1": 0.7643742541892183,
+      "precision": 0.7914278734228383,
+      "recall": 0.776426254531578,
+      "auc": 0.8472044232529352
     }
   },
   "ridge_classifier": {
@@ -130,13 +130,13 @@
     "category": "Classical ML",
     "feature_type": "tfidf",
     "path": "models/classical/ridge_classifier.joblib",
-    "train_time": 2.47,
+    "train_time": 2.81,
     "metrics": {
-      "accuracy": 0.8306146854819422,
-      "f1": 0.828998752231081,
-      "precision": 0.8302326720561016,
-      "recall": 0.8306146854819422,
-      "auc": 0.912956008100908
+      "accuracy": 0.8291833619538256,
+      "f1": 0.8275821569344881,
+      "precision": 0.8287541748599413,
+      "recall": 0.8291833619538256,
+      "auc": 0.9124386015607868
     }
   },
   "sgd_classifier": {
@@ -144,13 +144,13 @@
     "category": "Classical ML",
     "feature_type": "tfidf",
     "path": "models/classical/sgd_classifier.joblib",
-    "train_time": 0.79,
+    "train_time": 0.86,
     "metrics": {
-      "accuracy": 0.8313800526189906,
-      "f1": 0.829447488964724,
-      "precision": 0.8313986937242369,
-      "recall": 0.8313800526189906,
-      "auc": 0.9182208538327468
+      "accuracy": 0.8300896775424538,
+      "f1": 0.8281615691870777,
+      "precision": 0.8300632131730357,
+      "recall": 0.8300896775424538,
+      "auc": 0.9176467024009698
     }
   },
   "passive_aggressive": {
@@ -158,13 +158,13 @@
     "category": "Classical ML",
     "feature_type": "tfidf",
     "path": "models/classical/passive_aggressive.joblib",
-    "train_time": 3.5,
+    "train_time": 2.88,
     "metrics": {
-      "accuracy": 0.7884238220521407,
-      "f1": 0.7884334313143153,
-      "precision": 0.7884431321714687,
-      "recall": 0.7884238220521407,
-      "auc": 0.8757773161916729
+      "accuracy": 0.7928353367677924,
+      "f1": 0.7927268828718145,
+      "precision": 0.792630354691273,
+      "recall": 0.7928353367677924,
+      "auc": 0.8787474788089615
     }
   },
   "perceptron": {
@@ -172,13 +172,13 @@
     "category": "Classical ML",
     "feature_type": "tfidf",
     "path": "models/classical/perceptron.joblib",
-    "train_time": 0.92,
+    "train_time": 0.87,
     "metrics": {
-      "accuracy": 0.7907677589093518,
-      "f1": 0.7908393162239624,
-      "precision": 0.7909161771041219,
-      "recall": 0.7907677589093518,
-      "auc": 0.878005827534047
+      "accuracy": 0.792644533485976,
+      "f1": 0.7931112971712274,
+      "precision": 0.7938416885484202,
+      "recall": 0.792644533485976,
+      "auc": 0.8801308919249976
     }
   },
   "mlp_classifier": {
@@ -186,13 +186,13 @@
     "category": "Classical ML",
     "feature_type": "tfidf",
     "path": "models/classical/mlp_classifier.joblib",
-    "train_time": 1329.3,
+    "train_time": 2561.78,
     "metrics": {
-      "accuracy": 0.8324802678784979,
-      "f1": 0.8297480975407571,
-      "precision": 0.8339442097370092,
-      "recall": 0.8324802678784979,
-      "auc": 0.9271026541049467
+      "accuracy": 0.838294218660561,
+      "f1": 0.8378493236225837,
+      "precision": 0.8377167149851589,
+      "recall": 0.838294218660561,
+      "auc": 0.9294000963818896
     }
   },
   "knn": {
@@ -200,13 +200,13 @@
     "category": "Classical ML",
     "feature_type": "tfidf",
     "path": "models/classical/knn.joblib",
-    "train_time": 0.02,
+    "train_time": 0.04,
     "metrics": {
-      "accuracy": 0.7504424778761062,
-      "f1": 0.7466305456957608,
-      "precision": 0.7483309379826645,
-      "recall": 0.7504424778761062,
-      "auc": 0.8245901898213178
+      "accuracy": 0.7511448196908986,
+      "f1": 0.7471232063548384,
+      "precision": 0.7491663050691193,
+      "recall": 0.7511448196908986,
+      "auc": 0.8248541209661651
     }
   },
   "gradient_boosting": {
@@ -214,13 +214,27 @@
     "category": "Classical ML",
     "feature_type": "dense",
     "path": "models/classical/gradient_boosting.joblib",
-    "train_time": 125.35,
+    "train_time": 92.43,
     "metrics": {
-      "accuracy": 0.7782348720401818,
-      "f1": 0.7720193741467752,
-      "precision": 0.7806622688896583,
-      "recall": 0.7782348720401818,
-      "auc": 0.8630393802439252
+      "accuracy": 0.7723239839725243,
+      "f1": 0.7664414721314536,
+      "precision": 0.7736071169779112,
+      "recall": 0.7723239839725243,
+      "auc": 0.8554068333953567
+    }
+  },
+  "xgboost": {
+    "display_name": "XGBoost",
+    "category": "Classical ML",
+    "feature_type": "tfidf",
+    "path": "models/classical/xgboost.joblib",
+    "train_time": 297.97,
+    "metrics": {
+      "accuracy": 0.8490746040831902,
+      "f1": 0.8457782097941625,
+      "precision": 0.8537898649679118,
+      "recall": 0.8490746040831902,
+      "auc": 0.9356340394043187
     }
   },
   "lightgbm": {
@@ -228,13 +242,13 @@
     "category": "Classical ML",
     "feature_type": "tfidf",
     "path": "models/classical/lightgbm.joblib",
-    "train_time": 79.98,
+    "train_time": 149.76,
     "metrics": {
-      "accuracy": 0.8531930160248744,
-      "f1": 0.8501265027252602,
-      "precision": 0.8576280364126976,
-      "recall": 0.8531930160248744,
-      "auc": 0.9381801333143425
+      "accuracy": 0.8510780385422629,
+      "f1": 0.84821625751161,
+      "precision": 0.8546273387119858,
+      "recall": 0.8510780385422629,
+      "auc": 0.9374180329211996
     }
   },
   "catboost": {
@@ -242,61 +256,13 @@
     "category": "Classical ML",
     "feature_type": "dense",
     "path": "models/classical/catboost.joblib",
-    "train_time": 2.39,
+    "train_time": 2.65,
     "metrics": {
-      "accuracy": 0.7900980626644344,
-      "f1": 0.7872002032091613,
-      "precision": 0.789276805192393,
-      "recall": 0.7900980626644344,
-      "auc": 0.8752739033455671
-    }
-  },
-  "lstm": {
-    "display_name": "LSTM",
-    "category": "Deep Learning",
-    "feature_type": "sequence",
-    "path": "models/deep_learning/lstm.keras",
-    "train_time": 2125.4,
-    "metrics": {
-      "accuracy": 0.8088973929681894,
-      "f1": 0.8054193221545429,
-      "auc": 0.9028224889585169
-    }
-  },
-  "gru": {
-    "display_name": "GRU",
-    "category": "Deep Learning",
-    "feature_type": "sequence",
-    "path": "models/deep_learning/gru.keras",
-    "train_time": 764.14,
-    "metrics": {
-      "accuracy": 0.8180817986127721,
-      "f1": 0.8135543012156274,
-      "auc": 0.9172424462638862
-    }
-  },
-  "cnn": {
-    "display_name": "CNN",
-    "category": "Deep Learning",
-    "feature_type": "sequence",
-    "path": "models/deep_learning/cnn.keras",
-    "train_time": 94.01,
-    "metrics": {
-      "accuracy": 0.8231523558957188,
-      "f1": 0.8236622823238381,
-      "auc": 0.9198909395785607
-    }
-  },
-  "cnn_lstm": {
-    "display_name": "CNN + LSTM",
-    "category": "Deep Learning",
-    "feature_type": "sequence",
-    "path": "models/deep_learning/cnn_lstm.keras",
-    "train_time": 153.27,
-    "metrics": {
-      "accuracy": 0.8299449892370246,
-      "f1": 0.828154449608541,
-      "auc": 0.922750309577563
+      "accuracy": 0.7818641480633467,
+      "f1": 0.7791849481092069,
+      "precision": 0.7805793868337836,
+      "recall": 0.7818641480633467,
+      "auc": 0.8717177711802933
     }
   },
   "hybrid_stacking": {
@@ -304,32 +270,13 @@
     "category": "Hybrid",
     "feature_type": "hybrid",
     "path": "models/hybrid/stacking_lr.joblib",
-    "train_time": 0.0,
-    "metrics": {},
-    "n_base_models": 22,
-    "base_model_names": [
-      "logistic_regression",
-      "multinomial_nb",
-      "bernoulli_nb",
-      "complement_nb",
-      "linear_svm",
-      "decision_tree",
-      "random_forest",
-      "extra_trees",
-      "adaboost",
-      "ridge_classifier",
-      "sgd_classifier",
-      "passive_aggressive",
-      "perceptron",
-      "mlp_classifier",
-      "knn",
-      "gradient_boosting",
-      "lightgbm",
-      "catboost",
-      "lstm",
-      "gru",
-      "cnn",
-      "cnn_lstm"
-    ]
+    "train_time": 0.04,
+    "metrics": {
+      "accuracy": 0.848979202442282,
+      "f1": 0.8470334896569137,
+      "precision": 0.8499380654861107,
+      "recall": 0.848979202442282,
+      "auc": 0.9280501716969567
+    }
   }
 }

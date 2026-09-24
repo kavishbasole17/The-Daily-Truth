@@ -148,6 +148,23 @@ def compute_verdict(
 
     verdict, confidence = _verdict_from_score(p_real, low, high)
 
+    # Evidence dominance over stylistic bias:
+    # Stylistic models look at prose style/length and can be heavily biased on short prompts.
+    # When ground-truth evidence explicitly corroborates or refutes the claim, evidence takes precedence.
+    if not nli_degraded:
+        has_supported_claims = any(cv.get("verdict") == "entailment" for cv in claim_verdicts) or features.get("entail_mass_max", 0.0) >= 0.35
+        has_no_refutations = features.get("contradict_mass_max", 0.0) < 0.2 and features.get("min_support", 0.0) >= 0.0
+        has_refutations = any(cv.get("verdict") == "contradiction" for cv in claim_verdicts) or features.get("contradict_mass_max", 0.0) >= 0.35
+
+        if has_supported_claims and has_no_refutations and verdict == "likely_fake":
+            # Evidence verified the claim — override style classifier's false-positive "fake"
+            p_real = max(p_real, 0.55 + 0.4 * features.get("mean_support", 0.5))
+            verdict, confidence = _verdict_from_score(p_real, low, high)
+        elif has_refutations and verdict == "likely_real":
+            # Evidence refuted the claim — override style classifier's "real"
+            p_real = min(p_real, 0.45 - 0.4 * features.get("contradict_mass_max", 0.5))
+            verdict, confidence = _verdict_from_score(p_real, low, high)
+
     # Hard gates — abstain regardless of the score.
     forced_reason = None
     if nli_degraded:
@@ -157,6 +174,17 @@ def compute_verdict(
         )
     elif features["coverage"] == 0.0 and claim_verdicts:
         forced_reason = "no claim could be checked against any source"
+    elif (
+        claim_verdicts
+        and features.get("informative_ratio", 0.0) == 0.0
+        and features.get("entail_mass_max", 0.0) < 0.2
+        and features.get("contradict_mass_max", 0.0) < 0.2
+        and verdict == "likely_real"
+    ):
+        forced_reason = (
+            "evidence was inconclusive — factual claims could not be corroborated or "
+            "refuted by trusted sources, held for human review"
+        )
 
     if forced_reason and verdict != "uncertain":
         verdict = "uncertain"

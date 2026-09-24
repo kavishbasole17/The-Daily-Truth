@@ -81,10 +81,10 @@ CONTRADICTION_MARGIN = 0.10
 INFORMATIVE_WEIGHT_FLOOR = 0.25
 
 # How much a detected numeric conflict may add to contradiction probability.
-# Deliberately partial: the NLI model already catches most numeric
-# contradictions on its own, and a figure that differs may be a revision or a
-# differently-defined metric rather than a refutation.
-NUMERIC_BOOST = 0.5
+# Raised to 1.0 because a 0.5 boost multiplied by real-world relevance weights
+# typically results in a contradict_mass < 0.35, which suppresses the contradiction entirely.
+# Date/number mismatches (like release years) must be able to flag a claim as contradicted.
+NUMERIC_BOOST = 1.0
 
 
 # ── Lexical fallback (degraded — never allowed to drive a committed verdict) ───
@@ -213,9 +213,11 @@ def aggregate_claim(
 
     # A refutation only counts once it clears the higher contradiction bar; a
     # weak one is discounted rather than allowed to drive the article's score.
+    # If a numeric conflict was detected, we bypass the margin requirement
+    # because explicit date/number mismatches are hard refutations, not NLI artifacts.
     refutes = (
         contradict_mass >= CONTRADICTION_FLOOR
-        and contradict_mass >= entail_mass + CONTRADICTION_MARGIN
+        and (contradict_mass >= entail_mass + CONTRADICTION_MARGIN or max_numeric > 0)
     )
     effective_contradiction = contradict_mass if refutes else contradict_mass * 0.25
     support = entail_mass - effective_contradiction

@@ -168,7 +168,7 @@ def train_and_save_classical(X_train, X_test, y_train, y_test):
          X_tr, y_train, X_te, 'tfidf'),
 
         ('adaboost', 'AdaBoost',
-         AdaBoostClassifier(n_estimators=100, random_state=42, algorithm='SAMME'),
+         AdaBoostClassifier(n_estimators=100, random_state=42),
          X_tr, y_train, X_te, 'tfidf'),
 
         ('ridge_classifier', 'Ridge Classifier',

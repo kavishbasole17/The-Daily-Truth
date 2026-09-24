@@ -14,6 +14,8 @@ expected outcome for true and false articles alike.
 """
 from __future__ import annotations
 
+import re
+from typing import Any
 from urllib.parse import urlparse
 
 # Wire services — the primary sourcing layer most other outlets republish.
@@ -56,15 +58,111 @@ _REFERENCE = {
     "worldbank.org": 0.9,
 }
 
-TRUST: dict[str, float] = {**_WIRE, **_MAJOR, **_REFERENCE}
+# Regional & Local News Outlets
+_REGIONAL_MEDIA: dict[str, dict[str, Any]] = {
+    "telugu": {
+        "name": "Telugu / AP & Telangana",
+        "keywords": ["telugu", "andhra", "telangana", "hyderabad", "tollywood", "amaravati", "vizag", "visakhapatnam", "nani", "chiranjeevi", "prabhas", "allu arjun", "mahesh babu", "ntr"],
+        "domains": {
+            "thehansindia.com": 0.8,
+            "deccanchronicle.com": 0.85,
+            "telanganatoday.com": 0.8,
+            "cinemaexpress.com": 0.85,
+            "123telugu.com": 0.8,
+            "greatandhra.com": 0.75,
+            "gulte.com": 0.75,
+            "pinkvilla.com": 0.75,
+            "thehindu.com": 0.9,
+            "timesofindia.indiatimes.com": 0.8,
+        }
+    },
+    "tamil": {
+        "name": "Tamil / Tamil Nadu",
+        "keywords": ["tamil", "tamil nadu", "chennai", "kollywood", "madurai", "coimbatore", "vijay", "ajith", "rajinikanth", "kamal haasan"],
+        "domains": {
+            "dtnext.in": 0.8,
+            "thehindu.com": 0.9,
+            "cinemaexpress.com": 0.85,
+            "dinamalar.com": 0.8,
+            "timesofindia.indiatimes.com": 0.8,
+        }
+    },
+    "kannada": {
+        "name": "Kannada / Karnataka",
+        "keywords": ["kannada", "karnataka", "bangalore", "bengaluru", "sandalwood", "mysore", "yash", "sudeep"],
+        "domains": {
+            "deccanherald.com": 0.85,
+            "thehindu.com": 0.9,
+            "bangaloremirror.indiatimes.com": 0.8,
+        }
+    },
+    "malayalam": {
+        "name": "Malayalam / Kerala",
+        "keywords": ["malayalam", "kerala", "kochi", "thiruvananthapuram", "mollywood", "calicut", "mohanlal", "mammootty"],
+        "domains": {
+            "onmanorama.com": 0.85,
+            "mathrubhumi.com": 0.8,
+            "thehindu.com": 0.9,
+        }
+    },
+    "hindi_north": {
+        "name": "North India / Bollywood",
+        "keywords": ["delhi", "mumbai", "bollywood", "uttar pradesh", "bihar", "punjab", "rajasthan", "haryana", "noida", "shah rukh", "salman khan"],
+        "domains": {
+            "hindustantimes.com": 0.85,
+            "indianexpress.com": 0.85,
+            "ndtv.com": 0.8,
+            "mid-day.com": 0.8,
+            "freepressjournal.in": 0.8,
+            "filmfare.com": 0.8,
+            "bollywoodhungama.com": 0.8,
+            "timesofindia.indiatimes.com": 0.8,
+        }
+    },
+    "uk": {
+        "name": "United Kingdom",
+        "keywords": ["uk", "britain", "british", "london", "england", "scotland", "wales", "westminster", "downing street", "parliament"],
+        "domains": {
+            "bbc.co.uk": 0.9, "bbc.com": 0.9,
+            "theguardian.com": 0.9,
+            "telegraph.co.uk": 0.85,
+            "independent.co.uk": 0.85,
+            "news.sky.com": 0.85,
+            "ft.com": 0.9,
+        }
+    },
+    "us": {
+        "name": "United States",
+        "keywords": ["us", "usa", "america", "american", "washington", "new york", "california", "texas", "florida", "congress", "senate", "white house"],
+        "domains": {
+            "nytimes.com": 0.9, "washingtonpost.com": 0.9,
+            "wsj.com": 0.9, "npr.org": 0.9,
+            "cbsnews.com": 0.85, "nbcnews.com": 0.85, "abcnews.go.com": 0.85,
+            "latimes.com": 0.85, "politico.com": 0.85,
+        }
+    },
+    "middle_east": {
+        "name": "Middle East / Gulf",
+        "keywords": ["uae", "dubai", "gulf", "saudi", "qatar", "israel", "palestine", "middle east", "abu dhabi"],
+        "domains": {
+            "aljazeera.com": 0.85,
+            "khaleejtimes.com": 0.8,
+            "gulfnews.com": 0.8,
+            "thenationalnews.com": 0.85,
+        }
+    }
+}
+
+# Flatten all regional domain trusts
+_ALL_REGIONAL_DOMAINS: dict[str, float] = {}
+for _r in _REGIONAL_MEDIA.values():
+    _ALL_REGIONAL_DOMAINS.update(_r.get("domains", {}))
+
+TRUST: dict[str, float] = {**_WIRE, **_MAJOR, **_REFERENCE, **_ALL_REGIONAL_DOMAINS}
 
 DEFAULT_TRUST = 0.5
 
-# Domains queried through NewsAPI's `domains` filter. `domains` rather than
-# NewsAPI's fixed `sources` catalogue: `sources` has very thin non-US/UK
-# coverage, and combining both in one request silently drops the `domains`
-# filter, so international outlets never actually got queried.
-TRUSTED_NEWS_DOMAINS = [d for d in {**_WIRE, **_MAJOR} if "." in d]
+TRUSTED_NEWS_DOMAINS = [d for d in {**_WIRE, **_MAJOR, **_ALL_REGIONAL_DOMAINS} if "." in d]
 
 
 # Display names NewsAPI reports that don't reduce to their domain by any
@@ -155,3 +253,37 @@ def trust_for(url_or_name: str) -> float:
         if parent in TRUST:
             return TRUST[parent]
     return DEFAULT_TRUST
+
+
+def extract_regions(text: str) -> list[str]:
+    """Identify regions or localities mentioned in text based on keywords/entities."""
+    if not text:
+        return []
+    lowered = text.lower()
+    matched = []
+    for r_key, r_info in _REGIONAL_MEDIA.items():
+        for kw in r_info.get("keywords", []):
+            # Check for whole word or phrase match
+            pattern = rf"\b{re.escape(kw)}\b"
+            if re.search(pattern, lowered):
+                if r_key not in matched:
+                    matched.append(r_key)
+                break
+    return matched
+
+
+def get_regional_domains(regions: list[str]) -> list[str]:
+    """Retrieve trusted domains specific to the detected regions."""
+    domains = []
+    for r in regions:
+        if r in _REGIONAL_MEDIA:
+            domains.extend(list(_REGIONAL_MEDIA[r].get("domains", {}).keys()))
+    return list(dict.fromkeys(domains))
+
+
+def get_region_display_name(region_key: str) -> str:
+    """Friendly display name for a region key."""
+    if region_key in _REGIONAL_MEDIA:
+        return _REGIONAL_MEDIA[region_key].get("name", region_key.title())
+    return region_key.title()
+

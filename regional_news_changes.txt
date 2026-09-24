@@ -1,0 +1,47 @@
+REGIONAL NEWS & LOCALITY ROUTING: DETAILED EXPLANATION
+======================================================
+
+Why This Change Was Made
+------------------------
+In the initial project, the evidence retrieval system relied primarily on generic global providers like Wikipedia and NewsAPI. While this worked well for major global events, it failed when evaluating regional claims (like a local Telugu movie release or a specific Indian state-level political statement). 
+When you tested the claim about the movie "Paradise" (starring Nani), NewsAPI failed to return results from specific local domains like `telanganatoday.com`, `greatandhra.com`, or `123telugu.com` because NewsAPI's free tier index is limited and often misses regional Indian media. Because no evidence was found, the system was essentially guessing or relying purely on the AI's stylistic text bias, leading to incorrect "Likely Real" verdicts on completely false claims.
+
+How We Fixed It (Step-by-Step)
+------------------------------
+
+1. Created a Regional Media Taxonomy (in `sources.py`)
+We built a dictionary mapping specific geographical and linguistic regions to their trusted local news outlets. 
+For example, if a claim involves the "Telugu" region, the system now automatically knows to prioritize domains like:
+- greatandhra.com
+- 123telugu.com
+- cinemaexpress.com
+- telanganatoday.com
+- sakshi.com
+
+2. Automatic Region Detection (`extract_regions`)
+We added an intelligent keyword-extraction function that scans the raw text of the user's claim. If it spots keywords like "Telugu", "Tamil", "Hyderabad", "Nani", or "Tollywood", it flags the claim as belonging to that specific region and pulls the corresponding local domain list from the taxonomy.
+
+3. The Dedicated Regional Search Engine (`_search_regional` in `evidence_retriever.py`)
+Because NewsAPI couldn't reliably scrape these local sites, we built a brand new, custom search provider. 
+When the system detects a regional claim, it now automatically constructs a highly targeted Google News RSS query. 
+For example, instead of just searching "Nani Paradise Telugu movie", it dynamically builds a targeted query like:
+`Nani Paradise site:123telugu.com OR site:telanganatoday.com OR site:greatandhra.com`
+
+It then uses Google's massive index to instantly scrape the exact local articles, pull the text snippets, assign them the proper Trust scores, and feed them into the NLI fact-checker. 
+
+The Result
+----------
+By routing local claims directly to local news channels, the AI no longer has to guess. It successfully pulls hard evidence from the exact regional outlets reporting on the topic, allowing the system to confidently prove or disprove niche regional claims!
+
+What is a Google News RSS Query?
+--------------------------------
+A Google News RSS query is a way to pull real-time search results directly from Google News in a structured, machine-readable format (XML) instead of loading a standard visual webpage. "RSS" stands for Really Simple Syndication, which is a web standard designed specifically for feeding news headlines and summaries to other software.
+
+How it works in this project:
+Google News has a hidden feature where you can append a search query directly to its RSS URL. Instead of sending your system to a normal Google search page, we wrote a script that silently requests a URL like this:
+`https://news.google.com/rss/search?q=Nani+Paradise+site:greatandhra.com`
+
+Why did we use this?
+1. It acts like a free API: Standard search APIs (like SerpAPI or Google Custom Search) charge money per search or have strict rate limits. The RSS feed is completely free and instantly accessible.
+2. We can force it to search specific websites: By using the `site:domain.com` filter in the query, we trick Google News into ignoring major global publishers and *only* returning articles from the exact regional domains we defined in your taxonomy (like `telanganatoday.com`).
+3. It's structured for AI: Google News RSS automatically returns the data wrapped in neat `<title>`, `<description>`, and `<link>` XML tags. The python script we added in `evidence_retriever.py` parses these tags, strips out the HTML formatting, and feeds the clean text directly into your AI fact-checker!

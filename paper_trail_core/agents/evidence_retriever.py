@@ -330,6 +330,12 @@ def build_queries(claim: str) -> list[tuple[str, str]]:
     if wiki_terms:
         queries.append(("wikipedia", " ".join(dict.fromkeys(wiki_terms))[:120]))
 
+    # Regional News: if local regions are detected in the claim, query them directly
+    from paper_trail_core.agents.sources import extract_regions
+    regions = extract_regions(claim)
+    if regions and wiki_terms:
+        queries.append(("regional", " ".join(dict.fromkeys(wiki_terms))[:100] + " " + " ".join(regions)))
+
     # Deduplicate while preserving order.
     out: list[tuple[str, str]] = []
     for item in queries:
@@ -337,20 +343,30 @@ def build_queries(claim: str) -> list[tuple[str, str]]:
             out.append(item)
     return out
 
-
 # ── Providers ─────────────────────────────────────────────────────────────────
 
 def _search_newsapi(query: str) -> list[dict[str, Any]]:
     import requests
+    from paper_trail_core.agents.sources import (
+        extract_regions, get_regional_domains, get_region_display_name
+    )
 
     if not getattr(settings, "NEWS_API_KEY", None):
         return []
     if _newsapi_in_cooldown():
         raise RuntimeError("newsapi_rate_limited")
 
+    # Detect region from query to prioritize local news channels
+    regions = extract_regions(query)
+    reg_domains = get_regional_domains(regions) if regions else []
+    
+    # Priority domains: regional specific if detected, otherwise global trusted
+    target_domains = reg_domains if reg_domains else TRUSTED_NEWS_DOMAINS
+    target_domains_str = ",".join(target_domains[:30])
+
     params = {
         "q": query,
-        "domains": ",".join(TRUSTED_NEWS_DOMAINS),
+        "domains": target_domains_str,
         "language": "en",
         "searchIn": "title,description",
         "sortBy": "relevancy",
@@ -364,19 +380,32 @@ def _search_newsapi(query: str) -> list[dict[str, Any]]:
         raise RuntimeError("newsapi_rate_limited")
     if resp.status_code == 426:
         # "Upgrade required" — the free tier's ~1-month window was exceeded.
-        # That is an absence of *coverage we can reach*, not an error.
         return []
-    resp.raise_for_status()
+    
+    body = resp.json() if resp.status_code == 200 else {}
+    articles = body.get("articles", [])
 
-    body = resp.json()
-    if body.get("status") == "error":
-        if body.get("code") in ("rateLimited", "maximumResultsReached"):
-            _newsapi_start_cooldown()
-            raise RuntimeError("newsapi_rate_limited")
-        raise RuntimeError(f"newsapi: {body.get('code')}: {body.get('message')}")
+    # If strict domain filtering yielded 0 articles, fallback to open query
+    # so local/regional coverage isn't missed
+    if not articles and resp.status_code == 200:
+        fallback_params = {
+            "q": query,
+            "language": "en",
+            "searchIn": "title,description",
+            "sortBy": "relevancy",
+            "pageSize": 5,
+            "apiKey": settings.NEWS_API_KEY,
+        }
+        try:
+            fb_resp = requests.get("https://newsapi.org/v2/everything", params=fallback_params, timeout=HTTP_TIMEOUT)
+            if fb_resp.status_code == 200:
+                articles = fb_resp.json().get("articles", [])
+        except Exception:
+            pass
 
     out = []
-    for a in body.get("articles", []):
+    region_label = ", ".join(get_region_display_name(r) for r in regions) if regions else ""
+    for a in articles:
         title = (a.get("title") or "").strip()
         desc = (a.get("description") or "").strip()
         if not (title or desc):
@@ -390,6 +419,7 @@ def _search_newsapi(query: str) -> list[dict[str, Any]]:
             "domain": domain,
             "trust": trust_for(domain or source_name),
             "provider": "newsapi",
+            "region": region_label,
             "published_at": a.get("publishedAt", ""),
         })
     return out
@@ -483,11 +513,68 @@ def _search_serpapi(query: str) -> list[dict[str, Any]]:
     return out
 
 
+def _search_regional(query: str) -> list[dict[str, Any]]:
+    import requests
+    import urllib.parse
+    import xml.etree.ElementTree as ET
+    from paper_trail_core.agents.sources import (
+        extract_regions, get_regional_domains, get_region_display_name
+    )
+
+    regions = extract_regions(query)
+    if not regions:
+        return []
+        
+    domains = get_regional_domains(regions)
+    if not domains:
+        return []
+        
+    top_domains = domains[:8]
+    site_query = " OR ".join(f"site:{d}" for d in top_domains)
+    q = f"{query} {site_query}"
+    encoded_q = urllib.parse.quote(q)
+    url = f"https://news.google.com/rss/search?q={encoded_q}&hl=en-IN&gl=IN&ceid=IN:en"
+    
+    try:
+        resp = requests.get(url, timeout=HTTP_TIMEOUT)
+        if resp.status_code != 200:
+            return []
+        root = ET.fromstring(resp.text)
+        out = []
+        region_label = ", ".join(get_region_display_name(r) for r in regions)
+        for item in root.findall('.//item')[:5]:
+            title = (item.findtext('title') or "").strip()
+            desc = (item.findtext('description') or "").strip()
+            desc = re.sub(r'<[^>]+>', ' ', desc).strip()
+            
+            link = item.findtext('link') or ""
+            pub_date = item.findtext('pubDate') or ""
+            
+            domain = domain_of(link)
+            source_name = title.rsplit(" - ", 1)[-1] if " - " in title else domain
+            actual_domain = domain_of(source_name) or domain
+            
+            out.append({
+                "text": f"{title}. {desc}".strip(),
+                "url": link,
+                "domain": actual_domain,
+                "trust": trust_for(actual_domain),
+                "provider": "regional_news",
+                "region": region_label,
+                "published_at": pub_date,
+            })
+        return out
+    except Exception as exc:
+        log.warning("evidence_retriever: regional search failed: %s", exc)
+        return []
+
+
 _PROVIDER_MAP = {
     "newsapi": _search_newsapi,
     "wikipedia": _search_wikipedia,
     "tavily": _search_tavily,
     "serpapi": _search_serpapi,
+    "regional": _search_regional,
 }
 
 
