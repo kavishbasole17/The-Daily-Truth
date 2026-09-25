@@ -53,6 +53,16 @@ class PipelineState(TypedDict):
     ocr_confidence: Optional[float]     # 0-1, mean confidence across detected blocks
     ocr_script: Optional[str]           # detected script, e.g. "Devanagari", "Latin"
 
+    # Populated by translation_agent. original_text is the text exactly as
+    # received (post-OCR for image input) — never discarded, so a human
+    # reviewer or a future non-English-aware stage can still see it even
+    # after article_text has been overwritten with the English translation.
+    detected_language: Optional[str]        # ISO 639-1, e.g. "en", "hi", "unknown"
+    language_confidence: Optional[float]
+    original_text: Optional[str]
+    translated_text: Optional[str]
+    translation_confidence: Optional[float]
+
     # Populated by claim_extractor
     claims: list[str]
 

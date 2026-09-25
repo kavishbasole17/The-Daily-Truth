@@ -159,24 +159,26 @@ curl -X POST http://localhost:8000/articles/submit \
 ## Agentic pipeline
 
 LangGraph StateGraph, entered via a conditional route on `input_type` — image
-submissions pass through OCR first, text/URL submissions skip straight to
-claim extraction:
+submissions pass through OCR first, text/URL submissions go straight to
+language ID + translation:
 
 ```
 (image) → ocr ─┐
-                ├─→ extract_claims → retrieve_evidence → verify_claims → run_ensemble → adjudicate
+                ├─→ translate → extract_claims → retrieve_evidence → verify_claims → run_ensemble → adjudicate
       (text) ───┘
 ```
 
-A failed or low-confidence OCR read does **not** flow into the normal
-claims/ensemble/fusion path — it routes to a dedicated abstain node instead.
-See `_ocr_abstain_node`'s docstring in `paper_trail_core/agents/pipeline.py`
-for why: with no real article text, that path let the trained fusion model
-score an all-zero evidence vector it was never fit on.
+A failed/low-confidence OCR read, or an untranslated/unsupported-language
+submission, does **not** flow into the normal claims/ensemble/fusion path —
+both route to a dedicated `abstain` node instead. See `_abstain_node`'s
+docstring in `paper_trail_core/agents/pipeline.py` for why: with no real
+English article text, that path let the trained fusion model score an
+all-zero evidence vector it was never fit on.
 
 | Node | What it does | Backend flag |
 |------|--------------|--------------|
 | `ocr` | Extracts text from an image (Tesseract + Hindi/English), confidence-gated | `OCR_BACKEND` (`tesseract`) |
+| `translate` | Detects language; translates Hindi → English (English passes through untouched) | `TRANSLATION_BACKEND` (`llm`) |
 | `extract_claims` | Segments sentences, ranks by check-worthiness | `CLAIM_BACKEND` (`heuristic`) |
 | `retrieve_evidence` | Entity queries → NewsAPI + Wikipedia, relevance-gated, cached | `EVIDENCE_BACKEND` (`live`) |
 | `verify_claims` | NLI over (evidence sentence, claim) pairs | `NLI_BACKEND` (`transformer`) |
@@ -185,7 +187,10 @@ score an all-zero evidence vector it was never fit on.
 
 `ocr` requires the Tesseract system binary plus the Hindi (`hin`) language
 pack, installed separately — see `requirements.txt`. Without it, image
-submissions degrade to the abstain path rather than guessing.
+submissions degrade to the abstain path rather than guessing. `translate`
+supports English (pass-through) and Hindi (via the Anthropic gateway) only
+for now — any other detected language also abstains rather than running
+English-tuned models on text they weren't built for.
 
 Each stage names its own backend. The old single `MOCK_MODE` flag gated two
 unrelated stages at once and defaulted to on, so the pipeline silently ran

@@ -3,30 +3,33 @@ LangGraph verification pipeline.
 
 Graph:
     (entry, routed on input_type)
-      ├─ "image" → ocr             ← extract text from an image, confidence-gated
-      │                 ↓
-      └─ "text"  → extract_claims  ← segment + rank check-worthy claims
-                        ↓
-                   retrieve_evidence ← entity queries, relevance-gated, cached
-                        ↓
-                   verify_claims    ← NLI per (evidence sentence, claim) pair
-                        ↓
-                   run_ensemble     ← stacking ensemble P(real)
-                        ↓
-                   adjudicate       ← calibrated fusion → verdict or abstention
-                        ↓
-                       END
+      ├─ "image" → ocr ─────┐  ← extract text from an image, confidence-gated
+      │                     ↓
+      └─ "text"  ────→ translate  ← detect language, translate to English if needed
+                            ↓
+                       extract_claims   ← segment + rank check-worthy claims
+                            ↓
+                       retrieve_evidence ← entity queries, relevance-gated, cached
+                            ↓
+                       verify_claims    ← NLI per (evidence sentence, claim) pair
+                            ↓
+                       run_ensemble     ← stacking ensemble P(real)
+                            ↓
+                       adjudicate       ← calibrated fusion → verdict or abstention
+                            ↓
+                           END
 
 Every node runs behind a stage guard: a timeout and a defined fallback state.
 A stage that hangs or throws degrades that stage only, records why, and lets
 the rest of the pipeline finish — so a search provider going down produces an
 honest "couldn't verify, held for review" instead of a 500 or, worse, a
-confident verdict computed from nothing. A failed or low-confidence OCR read
-is routed straight to a dedicated `ocr_abstain` terminal node instead of into
-extract_claims — see `_ocr_abstain_node`'s docstring for why routing it
-through the normal claims/ensemble/fusion path (which looked like a natural
-reuse of the existing "no claims" abstention) was wrong: with no article text
-at all, that path let the *trained* fusion model score an all-zero evidence
+confident verdict computed from nothing. A failed/low-confidence OCR read or
+an untranslatable/unsupported-language input is routed straight to a
+dedicated `abstain` terminal node instead of into extract_claims — see
+`_abstain_node`'s docstring for why routing it through the normal
+claims/ensemble/fusion path (which looked like a natural reuse of the
+existing "no claims" abstention) was wrong: with no usable article text at
+all, that path let the *trained* fusion model score an all-zero evidence
 vector it was never fit on, which is a different failure mode than "a short
 real article had nothing checkable."
 
@@ -62,6 +65,7 @@ from paper_trail_core.agents.evidence_retriever import retrieve_evidence_node
 from paper_trail_core.agents.ocr_agent import ocr_node
 from paper_trail_core.agents.state import ClaimVerdict, PipelineState
 from paper_trail_core.agents.stylistic_ensemble_agent import run_ensemble_node
+from paper_trail_core.agents.translation_agent import translate_node
 from paper_trail_core.agents.verifier import verify_claims_node
 from paper_trail_core.degradations import Degradation, degrade, summarise
 
@@ -80,14 +84,24 @@ def _fallback_ocr(_state: PipelineState) -> dict:
     }
 
 
-def _ocr_abstain_node(state: PipelineState) -> dict:
-    """
-    Terminal node for a failed/low-confidence OCR read.
+def _fallback_translate(_state: PipelineState) -> dict:
+    return {
+        "detected_language": "unknown", "language_confidence": 0.0,
+        "original_text": "", "translated_text": "", "translation_confidence": 0.0,
+        "article_text": "",
+    }
 
-    Deliberately does NOT proceed to extract_claims -> ... -> adjudicate.
-    Early testing showed why: with claim_verdicts=[] (nothing to check) and
-    article_text="", the adjudicator's "no claims -> fall back to the style
-    ensemble" path (a real, tested contract — see
+
+def _abstain_node(state: PipelineState) -> dict:
+    """
+    Terminal node for input that never became usable English article text —
+    a failed/low-confidence OCR read, or an untranslated/unsupported-language
+    submission. Deliberately does NOT proceed to
+    extract_claims -> ... -> adjudicate.
+
+    Early testing of the OCR path showed why: with claim_verdicts=[]
+    (nothing to check) and article_text="", the adjudicator's "no claims ->
+    fall back to the style ensemble" path (a real, tested contract — see
     tests/test_adjudicator.py::test_no_claims_falls_back_to_ensemble, which
     exists for a short-but-real article the style model can still score)
     ran the *trained fusion model* over an all-zero evidence feature vector
@@ -95,12 +109,16 @@ def _ocr_abstain_node(state: PipelineState) -> dict:
     "likely_fake" for a file that simply didn't exist — worse than a
     coin flip, since it looked like a real, checked verdict. There is no
     article here for the ensemble or fusion model to score; this node says
-    so directly instead of asking either to extrapolate from nothing.
+    so directly instead of asking either to extrapolate from nothing. The
+    same reasoning applies to a translation failure: an untranslated Hindi
+    article isn't "no claims", it's "no English text to check", and deserves
+    the same explicit stop rather than an English-tuned verdict on foreign text.
     """
-    ocr_degradations = [
-        d for d in state.get("degradations", []) if d.get("stage") == "ocr"
+    relevant = [
+        d for d in state.get("degradations", [])
+        if d.get("stage") in ("ocr", "translation") and d.get("severity") == "critical"
     ]
-    detail = ocr_degradations[-1]["detail"] if ocr_degradations else "OCR did not produce usable text."
+    detail = relevant[-1]["detail"] if relevant else "Input did not produce usable article text."
     return {
         "ensemble_score": 0.5,
         "final_verdict": "uncertain",
@@ -212,12 +230,18 @@ def _route_after_ocr(state: PipelineState) -> str:
     return "proceed" if (state.get("article_text") or "").strip() else "abstain"
 
 
+def _route_after_translation(state: PipelineState) -> str:
+    return "proceed" if (state.get("article_text") or "").strip() else "abstain"
+
+
 def _build_graph() -> StateGraph:
     g = StateGraph(PipelineState)
 
     g.add_node("ocr",
                with_stage_guard(ocr_node, "ocr", _fallback_ocr))
-    g.add_node("ocr_abstain", _ocr_abstain_node)
+    g.add_node("translate",
+               with_stage_guard(translate_node, "translation", _fallback_translate))
+    g.add_node("abstain", _abstain_node)
     g.add_node("extract_claims",
                with_stage_guard(extract_claims_node, "claim_extractor", _fallback_claims))
     g.add_node("retrieve_evidence",
@@ -230,12 +254,15 @@ def _build_graph() -> StateGraph:
                with_stage_guard(adjudicate_node, "adjudicator", _fallback_adjudicate))
 
     g.set_conditional_entry_point(
-        _route_on_input_type, {"image": "ocr", "text": "extract_claims"}
+        _route_on_input_type, {"image": "ocr", "text": "translate"}
     )
     g.add_conditional_edges(
-        "ocr", _route_after_ocr, {"proceed": "extract_claims", "abstain": "ocr_abstain"}
+        "ocr", _route_after_ocr, {"proceed": "translate", "abstain": "abstain"}
     )
-    g.add_edge("ocr_abstain",       END)
+    g.add_conditional_edges(
+        "translate", _route_after_translation, {"proceed": "extract_claims", "abstain": "abstain"}
+    )
+    g.add_edge("abstain",           END)
     g.add_edge("extract_claims",    "retrieve_evidence")
     g.add_edge("retrieve_evidence", "verify_claims")
     g.add_edge("verify_claims",     "run_ensemble")
@@ -312,6 +339,11 @@ def _base_state(url: Optional[str]) -> dict:
         "ocr_text":          None,
         "ocr_confidence":    None,
         "ocr_script":        None,
+        "detected_language": None,
+        "language_confidence": None,
+        "original_text":     None,
+        "translated_text":   None,
+        "translation_confidence": None,
         "claims":            [],
         "evidence":          [],
         "retrieval_stats":   {},

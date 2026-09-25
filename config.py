@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     EVIDENCE_BACKEND: str = "live"      # live | cache_only | mock
     ENSEMBLE_BACKEND: str = "real"      # real | mock
     OCR_BACKEND: str = "tesseract"      # tesseract | paddleocr | mock | off
+    TRANSLATION_BACKEND: str = "llm"    # llm | indictrans2 (not yet implemented) | off
 
     # Back-compat: honoured only if explicitly set in .env. MOCK_MODE=true
     # downgrades the two stages it used to gate.
@@ -60,6 +61,17 @@ class Settings(BaseSettings):
     OCR_LANGS: str = "hin+eng"          # Tesseract language codes, "+"-joined
     OCR_CONFIDENCE_MIN: float = 0.55    # below this, abstain rather than guess
     OCR_MAX_IMAGE_MB: float = 10.0
+
+    # ------------------------------------------------------------------
+    # Language ID + translation
+    # ------------------------------------------------------------------
+    # LLM over IndicTrans2 by default for the same reason OCR defaults to
+    # Tesseract over PaddleOCR: this project runs on CPU locally (Model
+    # 1/2/3 training moved to Colab — see docs/ARCHITECTURE.md), and a
+    # local NMT model download isn't worth the risk on top of two
+    # already-aborted GPU-toolkit installs this session. Revisit once local
+    # GPU is actually available again.
+    LANG_ID_MIN_CONFIDENCE: float = 0.5  # below this, language is "unknown"
 
     # ------------------------------------------------------------------
     # Embeddings (evidence relevance gating + claim dedup)

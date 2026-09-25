@@ -26,6 +26,13 @@ sentence-transformers>=2.2.0
 sentencepiece>=0.1.99        # DeBERTa-v3 tokenizer
 protobuf>=3.20               # required by the sentencepiece tokenizer converter
 
+# ── Language ID + translation ────────────────────────────────────────────────
+# langdetect is pure Python, no model download — see paper_trail_core/nlp/
+# lang_id.py for why it was chosen over a fastText/transformer detector.
+# Translation itself goes through the existing Anthropic gateway
+# (TRANSLATION_BACKEND=llm, the default); no extra package needed for that.
+langdetect>=1.0.9
+
 # ── OCR (image input) ──────────────────────────────────────────────────────────
 # pytesseract only wraps a subprocess call to the Tesseract system binary — it
 # does not ship it. Install Tesseract itself plus the Hindi (hin) language

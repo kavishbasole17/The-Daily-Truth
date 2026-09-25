@@ -105,7 +105,7 @@ revisited later.
 | Model 1 (MuRIL/IndicBERT stylistic) | Full fine-tune (fits in 6 GB at base size) |
 | Model 2 (region classifier) | Fine-tune DistilmBERT/MuRIL-base — small model, coarse label set (below), well within budget |
 | Model 3 (XLM-R/mDeBERTa NLI) | Full fine-tune, compare against the current off-the-shelf `DeBERTa-v3-base-mnli-fever-anli` as baseline |
-| Translation | IndicTrans2, local |
+| Translation | **Revised, implemented**: LLM (Anthropic gateway), not IndicTrans2 — matches the CPU-only fallback below now that compute turned out to be CPU-only locally (see "Decisions locked in (2026-09-25)" above). `indictrans2` is a named-but-not-implemented backend for when local GPU is available again. |
 | OCR | PaddleOCR (GPU-accelerated) primary + vision-LLM (Anthropic, via gateway) fallback for low-confidence blocks |
 | Region granularity | **Coarse**: National, International, North, South, East, West (6 classes total) — not full state/zone-level. Revisit granularity only if the labeled set supports it later. |
 | Vector store | **FAISS**, local file-based. No server dependency; fits local-GPU/local-dev setup. |
@@ -140,8 +140,8 @@ eval set across all languages/modalities, human-review → retraining loop,
 ```
 paper_trail_core/
   agents/
-    ocr_agent.py                 # NEW
-    lang_translation_agent.py    # NEW
+    ocr_agent.py                 # DONE
+    translation_agent.py         # DONE (named lang_translation_agent.py in the original plan)
     region_classifier_agent.py   # NEW
     rationale_agent.py           # NEW
     evidence_retriever.py        # EXTEND: cascade + region partitions
