@@ -41,6 +41,18 @@ class PipelineState(TypedDict):
     article_text: str
     url: Optional[str]
 
+    # Input routing. "text" (default, today's only path) skips the OCR node
+    # entirely; "image" enters through it. raw_image_ref is a filesystem path
+    # to the uploaded image — kept as a path rather than raw bytes so it
+    # doesn't get copied through every state dict update.
+    input_type: str                     # "text" | "image"
+    raw_image_ref: Optional[str]
+
+    # Populated by ocr_agent (image input only; None/unset for text input)
+    ocr_text: Optional[str]
+    ocr_confidence: Optional[float]     # 0-1, mean confidence across detected blocks
+    ocr_script: Optional[str]           # detected script, e.g. "Devanagari", "Latin"
+
     # Populated by claim_extractor
     claims: list[str]
 

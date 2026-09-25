@@ -158,20 +158,34 @@ curl -X POST http://localhost:8000/articles/submit \
 
 ## Agentic pipeline
 
-LangGraph StateGraph — five sequential nodes, each behind a timeout and a
-defined fallback:
+LangGraph StateGraph, entered via a conditional route on `input_type` — image
+submissions pass through OCR first, text/URL submissions skip straight to
+claim extraction:
 
 ```
-extract_claims → retrieve_evidence → verify_claims → run_ensemble → adjudicate
+(image) → ocr ─┐
+                ├─→ extract_claims → retrieve_evidence → verify_claims → run_ensemble → adjudicate
+      (text) ───┘
 ```
+
+A failed or low-confidence OCR read does **not** flow into the normal
+claims/ensemble/fusion path — it routes to a dedicated abstain node instead.
+See `_ocr_abstain_node`'s docstring in `paper_trail_core/agents/pipeline.py`
+for why: with no real article text, that path let the trained fusion model
+score an all-zero evidence vector it was never fit on.
 
 | Node | What it does | Backend flag |
 |------|--------------|--------------|
+| `ocr` | Extracts text from an image (Tesseract + Hindi/English), confidence-gated | `OCR_BACKEND` (`tesseract`) |
 | `extract_claims` | Segments sentences, ranks by check-worthiness | `CLAIM_BACKEND` (`heuristic`) |
 | `retrieve_evidence` | Entity queries → NewsAPI + Wikipedia, relevance-gated, cached | `EVIDENCE_BACKEND` (`live`) |
 | `verify_claims` | NLI over (evidence sentence, claim) pairs | `NLI_BACKEND` (`transformer`) |
 | `run_ensemble` | Stacking ensemble P(real) — one feature, not the verdict | `ENSEMBLE_BACKEND` (`real`) |
 | `adjudicate` | Calibrated fusion → verdict or abstention | — |
+
+`ocr` requires the Tesseract system binary plus the Hindi (`hin`) language
+pack, installed separately — see `requirements.txt`. Without it, image
+submissions degrade to the abstain path rather than guessing.
 
 Each stage names its own backend. The old single `MOCK_MODE` flag gated two
 unrelated stages at once and defaulted to on, so the pipeline silently ran

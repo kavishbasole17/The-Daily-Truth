@@ -2,26 +2,37 @@
 LangGraph verification pipeline.
 
 Graph:
-    extract_claims        ← segment + rank check-worthy claims
-         ↓
-    retrieve_evidence     ← entity queries, relevance-gated, cached
-         ↓
-    verify_claims         ← NLI per (evidence sentence, claim) pair
-         ↓
-    run_ensemble          ← stacking ensemble P(real)
-         ↓
-    adjudicate            ← calibrated fusion → verdict or abstention
-         ↓
-       END
+    (entry, routed on input_type)
+      ├─ "image" → ocr             ← extract text from an image, confidence-gated
+      │                 ↓
+      └─ "text"  → extract_claims  ← segment + rank check-worthy claims
+                        ↓
+                   retrieve_evidence ← entity queries, relevance-gated, cached
+                        ↓
+                   verify_claims    ← NLI per (evidence sentence, claim) pair
+                        ↓
+                   run_ensemble     ← stacking ensemble P(real)
+                        ↓
+                   adjudicate       ← calibrated fusion → verdict or abstention
+                        ↓
+                       END
 
 Every node runs behind a stage guard: a timeout and a defined fallback state.
 A stage that hangs or throws degrades that stage only, records why, and lets
 the rest of the pipeline finish — so a search provider going down produces an
 honest "couldn't verify, held for review" instead of a 500 or, worse, a
-confident verdict computed from nothing.
+confident verdict computed from nothing. A failed or low-confidence OCR read
+is routed straight to a dedicated `ocr_abstain` terminal node instead of into
+extract_claims — see `_ocr_abstain_node`'s docstring for why routing it
+through the normal claims/ensemble/fusion path (which looked like a natural
+reuse of the existing "no claims" abstention) was wrong: with no article text
+at all, that path let the *trained* fusion model score an all-zero evidence
+vector it was never fit on, which is a different failure mode than "a short
+real article had nothing checkable."
 
 Public API:
     run_verification_pipeline(article_text, url) -> VerdictResult
+    run_verification_pipeline_image(image_path, url) -> VerdictResult
 """
 from __future__ import annotations
 
@@ -48,6 +59,7 @@ except ImportError:  # pragma: no cover
 from paper_trail_core.agents.adjudicator import adjudicate_node
 from paper_trail_core.agents.claim_extractor import extract_claims_node
 from paper_trail_core.agents.evidence_retriever import retrieve_evidence_node
+from paper_trail_core.agents.ocr_agent import ocr_node
 from paper_trail_core.agents.state import ClaimVerdict, PipelineState
 from paper_trail_core.agents.stylistic_ensemble_agent import run_ensemble_node
 from paper_trail_core.agents.verifier import verify_claims_node
@@ -60,6 +72,46 @@ MAX_ARTICLE_CHARS = 50_000
 
 
 # ── Stage guard ────────────────────────────────────────────────────────────────
+
+def _fallback_ocr(_state: PipelineState) -> dict:
+    return {
+        "ocr_text": "", "ocr_confidence": 0.0, "ocr_script": "unknown",
+        "article_text": "",
+    }
+
+
+def _ocr_abstain_node(state: PipelineState) -> dict:
+    """
+    Terminal node for a failed/low-confidence OCR read.
+
+    Deliberately does NOT proceed to extract_claims -> ... -> adjudicate.
+    Early testing showed why: with claim_verdicts=[] (nothing to check) and
+    article_text="", the adjudicator's "no claims -> fall back to the style
+    ensemble" path (a real, tested contract — see
+    tests/test_adjudicator.py::test_no_claims_falls_back_to_ensemble, which
+    exists for a short-but-real article the style model can still score)
+    ran the *trained fusion model* over an all-zero evidence feature vector
+    it was never fit on. On a smoke test that returned a confident
+    "likely_fake" for a file that simply didn't exist — worse than a
+    coin flip, since it looked like a real, checked verdict. There is no
+    article here for the ensemble or fusion model to score; this node says
+    so directly instead of asking either to extrapolate from nothing.
+    """
+    ocr_degradations = [
+        d for d in state.get("degradations", []) if d.get("stage") == "ocr"
+    ]
+    detail = ocr_degradations[-1]["detail"] if ocr_degradations else "OCR did not produce usable text."
+    return {
+        "ensemble_score": 0.5,
+        "final_verdict": "uncertain",
+        "final_confidence": 0.0,
+        "fused_score": 0.5,
+        "fusion_features": {},
+        "fusion_method": "not_run",
+        "reasoning_trace": f"Held for human review: {detail}",
+        "needs_human_review": True,
+    }
+
 
 def _fallback_claims(_state: PipelineState) -> dict:
     return {"claims": []}
@@ -152,9 +204,20 @@ def with_stage_guard(
 
 # ── Graph construction ─────────────────────────────────────────────────────────
 
+def _route_on_input_type(state: PipelineState) -> str:
+    return "image" if state.get("input_type") == "image" else "text"
+
+
+def _route_after_ocr(state: PipelineState) -> str:
+    return "proceed" if (state.get("article_text") or "").strip() else "abstain"
+
+
 def _build_graph() -> StateGraph:
     g = StateGraph(PipelineState)
 
+    g.add_node("ocr",
+               with_stage_guard(ocr_node, "ocr", _fallback_ocr))
+    g.add_node("ocr_abstain", _ocr_abstain_node)
     g.add_node("extract_claims",
                with_stage_guard(extract_claims_node, "claim_extractor", _fallback_claims))
     g.add_node("retrieve_evidence",
@@ -166,7 +229,13 @@ def _build_graph() -> StateGraph:
     g.add_node("adjudicate",
                with_stage_guard(adjudicate_node, "adjudicator", _fallback_adjudicate))
 
-    g.set_entry_point("extract_claims")
+    g.set_conditional_entry_point(
+        _route_on_input_type, {"image": "ocr", "text": "extract_claims"}
+    )
+    g.add_conditional_edges(
+        "ocr", _route_after_ocr, {"proceed": "extract_claims", "abstain": "ocr_abstain"}
+    )
+    g.add_edge("ocr_abstain",       END)
     g.add_edge("extract_claims",    "retrieve_evidence")
     g.add_edge("retrieve_evidence", "verify_claims")
     g.add_edge("verify_claims",     "run_ensemble")
@@ -234,36 +303,15 @@ def _guarded_result(verdict: str, trace: str, degradations: list[Degradation]) -
     )
 
 
-def run_verification_pipeline(
-    article_text: str,
-    url: Optional[str] = None,
-) -> VerdictResult:
-    """
-    Run the full multi-agent verification pipeline.
-
-    Never raises and never returns a confident verdict it cannot justify: any
-    failure path yields `uncertain` with `needs_human_review=True` and a
-    populated degradation list explaining what went wrong.
-    """
-    text = (article_text or "").strip()
-    log.info("pipeline: starting (text_len=%d)", len(text))
-
-    # Input guards — reject before spending model time, with a real explanation.
-    if len(text) < MIN_ARTICLE_CHARS:
-        return _guarded_result(
-            "uncertain",
-            f"Article is too short to verify ({len(text)} characters; "
-            f"{MIN_ARTICLE_CHARS} required).",
-            degrade("pipeline", "text_too_short",
-                    f"Submitted text was {len(text)} characters.", severity="critical"),
-        )
-    if len(text) > MAX_ARTICLE_CHARS:
-        log.warning("pipeline: truncating %d chars to %d", len(text), MAX_ARTICLE_CHARS)
-        text = text[:MAX_ARTICLE_CHARS]
-
-    initial_state: PipelineState = {
-        "article_text":      text,
+def _base_state(url: Optional[str]) -> dict:
+    """Fields common to every entry path, before input-type-specific ones are set."""
+    return {
         "url":               url,
+        "input_type":        "text",
+        "raw_image_ref":     None,
+        "ocr_text":          None,
+        "ocr_confidence":    None,
+        "ocr_script":        None,
         "claims":            [],
         "evidence":          [],
         "retrieval_stats":   {},
@@ -281,6 +329,9 @@ def run_verification_pipeline(
         "error":             None,
     }
 
+
+def _run_graph(initial_state: PipelineState) -> VerdictResult:
+    """Shared invoke + result-building for every entry path."""
     try:
         result_state = _get_app().invoke(initial_state)
     except Exception as exc:
@@ -313,3 +364,65 @@ def run_verification_pipeline(
         degradations=degradations,
         retrieval_stats=result_state.get("retrieval_stats", {}),
     )
+
+
+def run_verification_pipeline(
+    article_text: str,
+    url: Optional[str] = None,
+) -> VerdictResult:
+    """
+    Run the full multi-agent verification pipeline over plain text.
+
+    Never raises and never returns a confident verdict it cannot justify: any
+    failure path yields `uncertain` with `needs_human_review=True` and a
+    populated degradation list explaining what went wrong.
+    """
+    text = (article_text or "").strip()
+    log.info("pipeline: starting (text_len=%d)", len(text))
+
+    # Input guards — reject before spending model time, with a real explanation.
+    if len(text) < MIN_ARTICLE_CHARS:
+        return _guarded_result(
+            "uncertain",
+            f"Article is too short to verify ({len(text)} characters; "
+            f"{MIN_ARTICLE_CHARS} required).",
+            degrade("pipeline", "text_too_short",
+                    f"Submitted text was {len(text)} characters.", severity="critical"),
+        )
+    if len(text) > MAX_ARTICLE_CHARS:
+        log.warning("pipeline: truncating %d chars to %d", len(text), MAX_ARTICLE_CHARS)
+        text = text[:MAX_ARTICLE_CHARS]
+
+    initial_state: PipelineState = {**_base_state(url), "article_text": text}
+    return _run_graph(initial_state)
+
+
+def run_verification_pipeline_image(
+    image_path: str,
+    url: Optional[str] = None,
+) -> VerdictResult:
+    """
+    Run the full multi-agent verification pipeline over an image.
+
+    article_text starts empty by design — the ocr node populates it (or
+    leaves it empty and abstains, on a failed read or low-confidence
+    transcription; see ocr_agent.py). Unlike the text entry point, there is
+    no text-length guard here: a length check on an empty starting string
+    would reject every image submission before OCR ever ran.
+    """
+    log.info("pipeline: starting (input_type=image)")
+
+    if not image_path:
+        return _guarded_result(
+            "uncertain",
+            "No image was provided.",
+            degrade("pipeline", "no_image", "Image submission had no file.", severity="critical"),
+        )
+
+    initial_state: PipelineState = {
+        **_base_state(url),
+        "article_text":   "",
+        "input_type":     "image",
+        "raw_image_ref":  image_path,
+    }
+    return _run_graph(initial_state)

@@ -26,6 +26,16 @@ sentence-transformers>=2.2.0
 sentencepiece>=0.1.99        # DeBERTa-v3 tokenizer
 protobuf>=3.20               # required by the sentencepiece tokenizer converter
 
+# ── OCR (image input) ──────────────────────────────────────────────────────────
+# pytesseract only wraps a subprocess call to the Tesseract system binary — it
+# does not ship it. Install Tesseract itself plus the Hindi (hin) language
+# pack separately before OCR_BACKEND=tesseract (the default) can do real work:
+#   Windows: https://github.com/UB-Mannheim/tesseract/wiki
+#   Debian/Ubuntu: apt install tesseract-ocr tesseract-ocr-hin
+# Without it, is_available() returns False and image submissions degrade to
+# the existing abstention path rather than guessing at unreadable text.
+pytesseract>=0.3.10
+
 # ── Visualisation ─────────────────────────────────────────────────────────────
 matplotlib>=3.5.0
 seaborn>=0.12.0

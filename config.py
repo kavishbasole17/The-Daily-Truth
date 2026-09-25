@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     NLI_BACKEND: str = "transformer"    # transformer | lexical | off
     EVIDENCE_BACKEND: str = "live"      # live | cache_only | mock
     ENSEMBLE_BACKEND: str = "real"      # real | mock
+    OCR_BACKEND: str = "tesseract"      # tesseract | paddleocr | mock | off
 
     # Back-compat: honoured only if explicitly set in .env. MOCK_MODE=true
     # downgrades the two stages it used to gate.
@@ -46,6 +47,19 @@ class Settings(BaseSettings):
     NLI_MAX_PAIRS: int = 200            # per article, highest-relevance pairs kept
     NLI_BATCH_SIZE: int = 32
     NLI_MAX_LENGTH: int = 256
+
+    # ------------------------------------------------------------------
+    # OCR (image input)
+    # ------------------------------------------------------------------
+    # Tesseract over PaddleOCR by default: this project runs on CPU locally
+    # (see docs/ARCHITECTURE.md "Decisions locked in" — the local GPU is
+    # reserved for Model 1/2/3 training on Colab, not available here), and
+    # Tesseract is the lighter-weight CPU option. Requires the Tesseract
+    # system binary plus the Hindi (hin) language pack installed separately —
+    # pytesseract only wraps the binary, it doesn't ship it. See README.
+    OCR_LANGS: str = "hin+eng"          # Tesseract language codes, "+"-joined
+    OCR_CONFIDENCE_MIN: float = 0.55    # below this, abstain rather than guess
+    OCR_MAX_IMAGE_MB: float = 10.0
 
     # ------------------------------------------------------------------
     # Embeddings (evidence relevance gating + claim dedup)
