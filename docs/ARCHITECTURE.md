@@ -84,12 +84,21 @@ need to know the input was ever non-English.
 
 All open questions below are resolved. This is now the plan, not a menu.
 
-**Compute:** Local GPU — RTX 4050 Laptop, 6 GB VRAM. Fits base-size
-multilingual encoders (MuRIL-base, IndicBERT-base, XLM-R-base) fine-tuned
-with fp16 + small batch/grad-accumulation. **Setup blocker found:** the
-currently installed `torch` reports `cuda.is_available() == False` — needs
-reinstalling against a CUDA build before any training script runs. Fix this
-first, as part of environment setup, not as a training-time surprise.
+**Compute:** Local GPU — RTX 4050 Laptop, 6 GB VRAM — is present, but **not
+usable locally for now**: installing a CUDA-enabled `torch` build
+(cu130, then cu128, both ~2.7 GB) got interrupted mid-download by low
+system memory (only ~3.3 GB free out of 15.2 GB total) and the user opted
+not to keep retrying. Local `torch` is CPU-only (`torch==2.14.0+cpu`,
+verified: `cuda.is_available() == False`) and all 111 tests pass against it.
+
+**Revised plan:** Model 1/2/3 *training* moves to Colab (GPU runtime) rather
+than this machine. Non-training work (OCR, translation, retrieval cascade,
+region classifier inference once trained, rationale, API) runs locally on
+CPU — none of it needs a local GPU. Training scripts (`scripts/train_*.py`,
+once written) should be Colab-notebook-friendly (no hardcoded local paths,
+checkpoints saved to `models/<name>/` for syncing back into this repo) so
+they can run unmodified in either environment if local CUDA setup is
+revisited later.
 
 | Decision | Choice |
 |---|---|
