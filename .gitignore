@@ -15,7 +15,6 @@ venv/
 *.db
 *.sqlite3
 .env
-.env.example
 catboost_info/
 
 # Retrieved-evidence cache. Regenerable and large; keeping it out of git avoids
@@ -24,6 +23,10 @@ catboost_info/
 # NewsAPI quota and a lot of wall time.
 cache/
 results/eval_cache/
+
+# Stray scratch diffs/patches
+*.diff
+*.patch
 
 # Frontend
 frontend/node_modules/
