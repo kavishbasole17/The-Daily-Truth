@@ -3,6 +3,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 
 import Navbar from "@/components/Navbar";
 import LoadingOverlay from "@/components/LoadingOverlay";
@@ -81,6 +82,13 @@ export default function SinglePredictionPage() {
             <section className="prediction-page section">
                 <div className="container">
                     <div className="page-header">
+                        <span className="page-eyebrow">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="9" />
+                                <path d="M8.5 12.5l2.5 2.5 5-5" />
+                            </svg>
+                            Model-Based Check
+                        </span>
                         <h1>SINGLE ARTICLE VERIFICATION</h1>
                         <p>Submit an article for newsroom analysis.</p>
                     </div>
@@ -117,21 +125,29 @@ export default function SinglePredictionPage() {
                     )}
 
                     {result && (
-                        <>
-                            <VerdictCard
-                                prediction={prediction}
-                                confidence={confidence}
-                            />
+                        <motion.div
+                            initial={{ opacity: 0, y: 16 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.4, ease: "easeOut" }}
+                        >
+                            <div className="result-grid">
+                                <div>
+                                    <VerdictCard
+                                        prediction={prediction}
+                                        confidence={confidence}
+                                    />
 
-                            <ConfidenceGauge
-                                value={confidence}
-                            />
+                                    <ProbabilityBar
+                                        real={realProbability}
+                                        fake={fakeProbability}
+                                    />
+                                </div>
 
-                            <ProbabilityBar
-                                real={realProbability}
-                                fake={fakeProbability}
-                            />
-                        </>
+                                <ConfidenceGauge
+                                    value={confidence}
+                                />
+                            </div>
+                        </motion.div>
                     )}
                 </div>
             </section>

@@ -65,6 +65,20 @@ export const getArticle = async (id) => {
     });
 };
 
+// Same async submit/poll shape as text, but the server runs OCR (Tesseract,
+// Hindi+English) over the image first and verifies whatever text it recovers.
+export const submitImageForVerification = async (file) => {
+    const token = await getDemoToken();
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/articles/submit-image", form, {
+        headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "multipart/form-data"
+        }
+    });
+};
+
 /**
  * Poll an article until the pipeline finishes.
  *
@@ -98,6 +112,12 @@ export const pollVerification = async (id, opts = {}) => {
 /** Submit and wait for the verdict. */
 export const verifyArticle = async (text, opts = {}) => {
     const { data } = await submitForVerification(text);
+    return pollVerification(data.id, opts);
+};
+
+/** Submit an image and wait for the verdict (OCR runs server-side first). */
+export const verifyImage = async (file, opts = {}) => {
+    const { data } = await submitImageForVerification(file);
     return pollVerification(data.id, opts);
 };
 

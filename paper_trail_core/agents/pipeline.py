@@ -297,6 +297,11 @@ class VerdictResult:
     fusion_features: dict = field(default_factory=dict)
     degradations: list[Degradation] = field(default_factory=list)
     retrieval_stats: dict = field(default_factory=dict)
+    # Final English article text the pipeline actually verified — for a text
+    # submission this just echoes the input, but for an image submission it's
+    # the only place the OCR (and, if applicable, translated) transcription
+    # comes back to the caller. Empty when OCR/translation abstained.
+    article_text: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -311,6 +316,7 @@ class VerdictResult:
             "fusion_features":    self.fusion_features,
             "degradations":       list(self.degradations),
             "retrieval_stats":    self.retrieval_stats,
+            "article_text":       self.article_text,
         }
 
     def claim_verdicts_json(self) -> str:
@@ -395,6 +401,7 @@ def _run_graph(initial_state: PipelineState) -> VerdictResult:
         fusion_features=result_state.get("fusion_features", {}),
         degradations=degradations,
         retrieval_stats=result_state.get("retrieval_stats", {}),
+        article_text=result_state.get("article_text", "") or "",
     )
 
 

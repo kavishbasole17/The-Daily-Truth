@@ -3,6 +3,8 @@
 export default function ProbabilityBar({ real = 0, fake = 0 }) {
     return (
         <div className="probability-card glass">
+            <span className="probability-card-title">Probability Breakdown</span>
+
             <div className="prob-row">
                 <span>REAL</span>
                 <span>{real}%</span>

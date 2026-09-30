@@ -3,6 +3,7 @@
 "use client";
 
 import { useState } from "react";
+import { motion } from "framer-motion";
 
 import Navbar from "@/components/Navbar";
 import LoadingOverlay from "@/components/LoadingOverlay";
@@ -50,6 +51,10 @@ export default function ConsensusPage() {
     const agreement = Math.round((result?.consensus_confidence ?? 0) * 100);
     const models = result?.results || [];
 
+    const realCount = models.filter(m => (m.label || "").toLowerCase() !== "fake").length;
+    const fakeCount = models.length - realCount;
+    const realShare = models.length ? Math.round((realCount / models.length) * 100) : 0;
+
     return (
         <>
             <Navbar />
@@ -59,6 +64,15 @@ export default function ConsensusPage() {
             <section className="prediction-page section">
                 <div className="container">
                     <div className="page-header">
+                        <span className="page-eyebrow">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="6" cy="12" r="3" />
+                                <circle cx="18" cy="7" r="3" />
+                                <circle cx="18" cy="17" r="3" />
+                                <path d="M8.6 10.5l6.8-3M8.6 13.5l6.8 3" />
+                            </svg>
+                            Multi-Model Panel
+                        </span>
                         <h1>EDITORIAL CONSENSUS</h1>
                         <p>Compare multiple model opinions.</p>
                     </div>
@@ -90,50 +104,63 @@ export default function ConsensusPage() {
                     )}
 
                     {result && (
-                        <>
+                        <motion.div
+                            initial={{ opacity: 0, y: 16 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.4, ease: "easeOut" }}
+                        >
                             <div className={`consensus-banner glass ${verdict === "fake" ? "fake-card" : "real-card"}`}>
                                 <h2>{verdict.toUpperCase()}</h2>
                                 <p>{agreement}% Agreement</p>
                             </div>
 
-                            <div className="consensus-grid">
-                                {models.map((m, i) => (
-                                    <details
-                                        key={i}
-                                        className="model-card glass"
-                                    >
-                                        <summary>
-                                            {m.display_name || m.model_name || `Model ${i + 1}`}
-                                        </summary>
+                            {models.length > 0 && (
+                                <div className="agreement-split">
+                                    <div className="agreement-split-track">
+                                        <div className="agreement-split-real" style={{ width: `${realShare}%` }} />
+                                        <div className="agreement-split-fake" style={{ width: `${100 - realShare}%` }} />
+                                    </div>
+                                    <div className="agreement-split-labels">
+                                        <span className="real">{realCount} models say REAL</span>
+                                        <span className="fake">{fakeCount} models say FAKE</span>
+                                    </div>
+                                </div>
+                            )}
 
-                                        <div className="model-content">
-                                            <div>
-                                                Prediction:{" "}
-                                                <span className={
-                                                    (m.label || "").toLowerCase() === "fake"
-                                                        ? "badge-fake"
-                                                        : "badge-real"
-                                                }>
+                            <div className="consensus-grid">
+                                {models.map((m, i) => {
+                                    const isFake = (m.label || "").toLowerCase() === "fake";
+                                    const conf = Math.round((m.confidence ?? 0) * 100);
+                                    return (
+                                        <div
+                                            key={i}
+                                            className={`model-card glass ${isFake ? "result-fake" : "result-real"}`}
+                                        >
+                                            <div className="model-card-header">
+                                                <span className="model-card-name">
+                                                    {m.display_name || m.model_name || `Model ${i + 1}`}
+                                                </span>
+                                                <span className={isFake ? "badge-fake" : "badge-real"}>
                                                     {m.label || "Unknown"}
                                                 </span>
                                             </div>
 
-                                            <div>
-                                                Confidence:{" "}
-                                                <strong>
-                                                    {Math.round((m.confidence ?? 0) * 100)}%
-                                                </strong>
+                                            <div className="model-card-bar">
+                                                <div
+                                                    className={`model-card-bar-fill ${isFake ? "result-fake" : "result-real"}`}
+                                                    style={{ width: `${conf}%` }}
+                                                />
                                             </div>
 
-                                            <div>
-                                                Category:{" "}
-                                                {m.category || "N/A"}
+                                            <div className="model-card-meta">
+                                                <span>{conf}% confidence</span>
+                                                <span>{m.category || "N/A"}</span>
                                             </div>
                                         </div>
-                                    </details>
-                                ))}
+                                    );
+                                })}
                             </div>
-                        </>
+                        </motion.div>
                     )}
                 </div>
             </section>

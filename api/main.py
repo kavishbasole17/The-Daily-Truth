@@ -19,6 +19,7 @@ Existing endpoints (unchanged):
 New endpoints (agentic pipeline + persistence):
     POST /auth/token               Obtain a JWT bearer token
     POST /articles/submit          Run verification pipeline, persist result  [auth required]
+    POST /articles/submit-image    OCR an image, then run verification pipeline [auth required]
     GET  /articles/{id}            Retrieve stored article + verdict
     GET  /review-queue             Articles flagged needs_human_review (paginated)
     POST /review-queue/{id}/resolve  Analyst manual verdict override          [auth required]

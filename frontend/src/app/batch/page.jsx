@@ -3,6 +3,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 
 import Navbar from "@/components/Navbar";
 import LoadingOverlay from "@/components/LoadingOverlay";
@@ -81,6 +82,12 @@ export default function BatchPage() {
             <section className="prediction-page section">
                 <div className="container">
                     <div className="page-header">
+                        <span className="page-eyebrow">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M4 6h16M4 12h16M4 18h10" />
+                            </svg>
+                            Bulk Processing
+                        </span>
                         <h1>BATCH ANALYSIS</h1>
                         <p>One article per line.</p>
                     </div>
@@ -120,48 +127,87 @@ export default function BatchPage() {
                     )}
 
                     {!!result.length && (
-                        <div className="batch-table glass">
-                            <table>
-                                <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>Preview</th>
-                                    <th>Prediction</th>
-                                    <th>Confidence</th>
-                                </tr>
-                                </thead>
-
-                                <tbody>
-                                {result.map((item, i) => (
-                                    <tr key={i}>
-                                        <td>{i + 1}</td>
-
-                                        <td className="text-preview">
-                                            {item.text_preview || `Article ${i + 1}`}
-                                        </td>
-
-                                        <td>
-                        <span
-                            className={
-                                (item.label || "").toLowerCase() === "fake"
-                                    ? "badge-fake"
-                                    : "badge-real"
-                            }
+                        <motion.div
+                            initial={{ opacity: 0, y: 16 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.4, ease: "easeOut" }}
                         >
-                          {item.label || "Unknown"}
-                        </span>
-                                        </td>
+                            <div className="batch-stats">
+                                <div className="batch-stat glass">
+                                    <span className="batch-stat-label">Analyzed</span>
+                                    <span className="batch-stat-value">{result.length}</span>
+                                </div>
+                                <div className="batch-stat glass">
+                                    <span className="batch-stat-label">Likely Real</span>
+                                    <span className="batch-stat-value real">
+                                        {result.filter(r => (r.label || "").toLowerCase() !== "fake").length}
+                                    </span>
+                                </div>
+                                <div className="batch-stat glass">
+                                    <span className="batch-stat-label">Likely Fake</span>
+                                    <span className="batch-stat-value fake">
+                                        {result.filter(r => (r.label || "").toLowerCase() === "fake").length}
+                                    </span>
+                                </div>
+                                <div className="batch-stat glass">
+                                    <span className="batch-stat-label">Avg. Confidence</span>
+                                    <span className="batch-stat-value">
+                                        {Math.round(
+                                            (result.reduce((sum, r) => sum + (r.confidence ?? 0), 0) / result.length) * 100
+                                        )}%
+                                    </span>
+                                </div>
+                            </div>
 
-                                        <td>
-                                            {item.confidence != null
-                                                ? `${Math.round(item.confidence * 100)}%`
-                                                : "N/A"}
-                                        </td>
+                            <div className="batch-table glass">
+                                <table>
+                                    <thead>
+                                    <tr>
+                                        <th>#</th>
+                                        <th>Preview</th>
+                                        <th>Prediction</th>
+                                        <th>Confidence</th>
                                     </tr>
-                                ))}
-                                </tbody>
-                            </table>
-                        </div>
+                                    </thead>
+
+                                    <tbody>
+                                    {result.map((item, i) => {
+                                        const isFake = (item.label || "").toLowerCase() === "fake";
+                                        const conf = item.confidence != null ? Math.round(item.confidence * 100) : null;
+                                        return (
+                                            <tr key={i}>
+                                                <td>{i + 1}</td>
+
+                                                <td className="text-preview">
+                                                    {item.text_preview || `Article ${i + 1}`}
+                                                </td>
+
+                                                <td>
+                                                    <span className={isFake ? "badge-fake" : "badge-real"}>
+                                                        {item.label || "Unknown"}
+                                                    </span>
+                                                </td>
+
+                                                <td>
+                                                    {conf != null ? (
+                                                        <div className="batch-confidence-cell">
+                                                            <div className="batch-confidence-track">
+                                                                <div
+                                                                    className={`batch-confidence-fill ${isFake ? "result-fake" : "result-real"}`}
+                                                                    style={{ width: `${conf}%` }}
+                                                                />
+                                                            </div>
+                                                            <span>{conf}%</span>
+                                                        </div>
+                                                    ) : "N/A"}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </motion.div>
                     )}
                 </div>
             </section>

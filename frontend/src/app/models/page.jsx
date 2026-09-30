@@ -3,6 +3,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
 
 import Navbar from "@/components/Navbar";
 import LoadingOverlay from "@/components/LoadingOverlay";
@@ -66,6 +67,12 @@ export default function ModelsPage() {
             <section className="prediction-page section">
                 <div className="container">
                     <div className="page-header">
+                        <span className="page-eyebrow">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M4 20V10m6 10V4m6 16v-7" />
+                            </svg>
+                            Benchmark Rankings
+                        </span>
                         <h1>MODEL LEADERBOARD</h1>
                         <p>Performance rankings and metrics.</p>
                     </div>
@@ -83,67 +90,78 @@ export default function ModelsPage() {
 
                     {!!sortedModels.length && (
                         <div className="models-grid">
-                            {sortedModels.map((model, index) => (
-                                <div
-                                    key={model.name || index}
-                                    className={`model-ranking-card glass ${
-                                        index === 0 ? "leader-card" : ""
-                                    }`}
-                                >
-                                    <div className="model-rank">
-                                        #{index + 1}
-                                    </div>
+                            {sortedModels.map((model, index) => {
+                                const metricEntries = [
+                                    ["Accuracy", model.metrics?.accuracy],
+                                    ["F1 Score", model.metrics?.f1],
+                                    ["Precision", model.metrics?.precision],
+                                    ["Recall", model.metrics?.recall],
+                                ];
 
-                                    <h2>
-                                        {model.name ||
-                                            model.model ||
-                                            `Model ${index + 1}`}
-                                    </h2>
-
-                                    {!model.loaded && (
-                                        <p className="model-not-loaded">Not loaded on this server</p>
-                                    )}
-
-                                    {hasMetrics(model) ? (
-                                        <div className="model-metrics">
-                                            <div>
-                                                <span>Accuracy</span>
-                                                <strong>{pct(model.metrics?.accuracy)}</strong>
-                                            </div>
-
-                                            <div>
-                                                <span>F1 Score</span>
-                                                <strong>{pct(model.metrics?.f1)}</strong>
-                                            </div>
-
-                                            <div>
-                                                <span>Precision</span>
-                                                <strong>{pct(model.metrics?.precision)}</strong>
-                                            </div>
-
-                                            <div>
-                                                <span>Recall</span>
-                                                <strong>{pct(model.metrics?.recall)}</strong>
-                                            </div>
-
-                                            <div>
-                                                <span>AUC</span>
-                                                <strong>
-                                                    {typeof model.metrics?.auc === "number"
-                                                        ? model.metrics.auc.toFixed(4)
-                                                        : "N/A"}
-                                                </strong>
-                                            </div>
+                                return (
+                                    <motion.div
+                                        key={model.name || index}
+                                        initial={{ opacity: 0, y: 16 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ duration: 0.35, delay: index * 0.05, ease: "easeOut" }}
+                                        className={`model-ranking-card glass ${
+                                            index === 0 ? "leader-card" : ""
+                                        }`}
+                                    >
+                                        <div className="model-rank">
+                                            #{index + 1}
                                         </div>
-                                    ) : (
-                                        <p className="model-no-benchmark">
-                                            {model.n_base_models
-                                                ? `Meta-ensemble over ${model.n_base_models} base models — not yet independently benchmarked.`
-                                                : "Not yet independently benchmarked."}
-                                        </p>
-                                    )}
-                                </div>
-                            ))}
+
+                                        <h2>
+                                            {model.name ||
+                                                model.model ||
+                                                `Model ${index + 1}`}
+                                        </h2>
+
+                                        {!model.loaded && (
+                                            <p className="model-not-loaded">Not loaded on this server</p>
+                                        )}
+
+                                        {hasMetrics(model) ? (
+                                            <div className="model-metrics">
+                                                {metricEntries.map(([label, value]) => (
+                                                    <div className="metric-row" key={label}>
+                                                        <span>{label}</span>
+                                                        <div className="metric-track">
+                                                            <div
+                                                                className="metric-fill"
+                                                                style={{ width: typeof value === "number" ? `${value * 100}%` : "0%" }}
+                                                            />
+                                                        </div>
+                                                        <strong>{pct(value)}</strong>
+                                                    </div>
+                                                ))}
+
+                                                <div className="metric-row">
+                                                    <span>AUC</span>
+                                                    <div className="metric-track">
+                                                        <div
+                                                            className="metric-fill"
+                                                            style={{ width: typeof model.metrics?.auc === "number" ? `${model.metrics.auc * 100}%` : "0%" }}
+                                                        />
+                                                    </div>
+                                                    <strong>
+                                                        {typeof model.metrics?.auc === "number"
+                                                            ? model.metrics.auc.toFixed(4)
+                                                            : "N/A"}
+                                                    </strong>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <p className="model-no-benchmark">
+                                                {model.n_base_models
+                                                    ? `Meta-ensemble over ${model.n_base_models} base models — not yet independently benchmarked.`
+                                                    : "Not yet independently benchmarked."}
+                                            </p>
+                                        )}
+                                    </motion.div>
+                                );
+                            })}
                         </div>
                     )}
                 </div>

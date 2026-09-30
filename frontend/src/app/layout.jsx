@@ -3,9 +3,9 @@
 import "@/styles/globals.css";
 
 import "@/styles/navbar.css";
-import "@/styles/ticker.css";
 import "@/styles/landing.css";
 import "@/styles/pages.css";
+import "@/styles/chat.css";
 import "@/styles/footer.css";
 
 import ErrorBoundary from "@/components/ErrorBoundary";

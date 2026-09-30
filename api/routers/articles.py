@@ -1,28 +1,49 @@
 """
 Article submission and retrieval endpoints.
 
-POST /articles/submit  — run the verification pipeline, persist the result.
-GET  /articles/{id}    — retrieve a stored article + verdict.
+POST /articles/submit        — run the verification pipeline over text, persist the result.
+POST /articles/submit-image  — OCR an uploaded image, then run the same pipeline.
+GET  /articles/{id}          — retrieve a stored article + verdict.
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
 from api.database import get_db
 from api.orm import Article, ReviewQueue, Verdict
-from paper_trail_core.agents.pipeline import run_verification_pipeline
+from paper_trail_core.agents.pipeline import run_verification_pipeline, run_verification_pipeline_image
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/articles", tags=["Articles"])
 
 AI_MODEL_VERSION = "pipeline-v2-evidence-fusion"
+
+try:
+    from config import settings
+    _OCR_MAX_IMAGE_MB = settings.OCR_MAX_IMAGE_MB
+except ImportError:  # pragma: no cover
+    _OCR_MAX_IMAGE_MB = 10.0
+
+# Content-type allowlist rather than trusting the client-supplied filename —
+# an uploaded file's extension is not evidence of its actual format, and
+# PIL.Image.open (used downstream by paper_trail_core/agents/ocr_agent.py)
+# only needs the bytes to be a real image, not a name that ends in .jpg.
+_EXT_BY_CONTENT_TYPE = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/bmp": ".bmp",
+    "image/tiff": ".tiff",
+}
 
 
 # ── Request / response schemas (local — avoids circular imports with api/schemas.py) ──
@@ -203,6 +224,79 @@ def _run_pipeline_job(article_id: int, text: str, url: Optional[str]) -> None:
         db.close()
 
 
+def _run_pipeline_image_job(article_id: int, image_path: str, url: Optional[str]) -> None:
+    """
+    Background worker for an image submission: OCR the image, run the same
+    evidence-grounded pipeline used for text, persist the result, and clean up
+    the temp file the upload was written to — mirrors `_run_pipeline_job`
+    above, see its docstring for why this opens its own DB session.
+    """
+    from api.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        article = db.get(Article, article_id)
+        if article is None:
+            log.error("pipeline job (image): article_id=%d disappeared", article_id)
+            return
+
+        article.status = "processing"
+        article.stage = "verifying"
+        db.commit()
+
+        vr = run_verification_pipeline_image(image_path, url)
+
+        # The article had no text at submission time — this is the first
+        # point the OCR (and, if applicable, translated) transcription is
+        # known, so it's what text_preview and any future re-read of this
+        # article will show.
+        if vr.article_text:
+            article.text = vr.article_text
+
+        verdict = Verdict(
+            article_id=article_id,
+            verdict=vr.verdict,
+            confidence=vr.confidence,
+            claim_verdicts=vr.claim_verdicts_json(),
+            ensemble_score=vr.ensemble_score,
+            reasoning_trace=vr.reasoning_trace,
+            needs_human_review=vr.needs_human_review,
+            degradations=vr.degradations_json(),
+            fused_score=vr.fused_score,
+            ai_model_version=AI_MODEL_VERSION,
+        )
+        db.add(verdict)
+        db.flush()
+
+        if vr.needs_human_review:
+            db.add(ReviewQueue(article_id=article_id, verdict_id=verdict.id))
+            log.info("pipeline job (image): article_id=%d flagged for human review", article_id)
+
+        article.status = "completed"
+        article.stage = None
+        db.commit()
+        log.info("pipeline job (image): article_id=%d done — %s (%.3f)",
+                 article_id, vr.verdict, vr.confidence)
+
+    except Exception as exc:
+        log.error("pipeline job (image): article_id=%d failed — %s", article_id, exc, exc_info=True)
+        db.rollback()
+        try:
+            article = db.get(Article, article_id)
+            if article is not None:
+                article.status = "failed"
+                article.stage = None
+                db.commit()
+        except Exception:
+            log.exception("pipeline job (image): could not mark article_id=%d failed", article_id)
+    finally:
+        db.close()
+        try:
+            os.remove(image_path)
+        except OSError:
+            pass
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.post(
@@ -249,6 +343,76 @@ def submit_article(
     log.info("submit_article: article_id=%d queued", article.id)
 
     background.add_task(_run_pipeline_job, article.id, req.text, req.url)
+
+    return _build_article_out(article)
+
+
+@router.post(
+    "/submit-image",
+    response_model=ArticleOut,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Submit a photo/screenshot of an article for OCR + verification (async)",
+)
+async def submit_article_image(
+    background: BackgroundTasks,
+    file: UploadFile = File(..., description="Photo or screenshot of the article"),
+    url: Optional[str] = Form(None, max_length=2048),
+    db: Session = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> ArticleOut:
+    """
+    Submit a photographed or screenshotted article image for verification.
+
+    Runs OCR first (Tesseract, Hindi+English —
+    `paper_trail_core/agents/ocr_agent.py`) to recover the article text, then
+    feeds the transcription through the same evidence-grounded pipeline used
+    by `POST /articles/submit`. If OCR confidence falls below the configured
+    floor, the pipeline abstains and flags the article for human review
+    rather than verifying a possibly-wrong transcription.
+
+    Returns **202 Accepted** immediately; poll `GET /articles/{id}` exactly as
+    for a text submission — the recovered text appears in `text_preview` once
+    processing completes.
+
+    **Requires Bearer token** — obtain one at `POST /auth/token`.
+    """
+    content_type = (file.content_type or "").lower()
+    ext = _EXT_BY_CONTENT_TYPE.get(content_type)
+    if ext is None:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=(
+                f"Unsupported image type '{file.content_type or 'unknown'}'. "
+                f"Allowed: {', '.join(sorted(_EXT_BY_CONTENT_TYPE))}."
+            ),
+        )
+
+    max_bytes = int(_OCR_MAX_IMAGE_MB * 1024 * 1024)
+    # Read one byte past the limit so an oversized upload is caught here,
+    # before anything is written to disk, rather than mid-write.
+    data = await file.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Image exceeds the {_OCR_MAX_IMAGE_MB:.0f}MB limit.",
+        )
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file upload.")
+
+    # A random server-side name (tempfile), not the client-supplied filename —
+    # the filename never touches the filesystem path.
+    fd, image_path = tempfile.mkstemp(prefix="paper_trail_upload_", suffix=ext)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+
+    article = Article(text="", url=url, status="processing", stage="queued")
+    db.add(article)
+    db.commit()
+    db.refresh(article)
+    log.info("submit_article_image: article_id=%d queued (%d bytes, %s)",
+              article.id, len(data), content_type)
+
+    background.add_task(_run_pipeline_image_job, article.id, image_path, url)
 
     return _build_article_out(article)
 

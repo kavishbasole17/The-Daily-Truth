@@ -18,21 +18,21 @@
 
 .logo{
     display:flex;
-    flex-direction:column;
+    align-items:center;
+    gap:12px;
     line-height:1;
 }
 
-.logo span:first-child{
-    font-size:.7rem;
-    letter-spacing:4px;
+.logo-wordmark{
+    font-family:"Playfair Display",serif;
+    font-size:1.4rem;
+    font-weight:700;
+    letter-spacing:-.2px;
     color:var(--text);
 }
 
-.logo span:last-child{
-    font-family:"Playfair Display",serif;
-    font-size:1.6rem;
-    font-weight:700;
-    color:var(--text);
+.logo-dot{
+    color:var(--red);
 }
 
 .nav-links{
@@ -82,7 +82,7 @@
         display:none;
     }
 
-    .logo span:last-child{
-        font-size:1.2rem;
+    .logo-wordmark{
+        font-size:1.15rem;
     }
 }

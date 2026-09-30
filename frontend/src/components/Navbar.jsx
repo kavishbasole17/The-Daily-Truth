@@ -4,6 +4,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import Logo from "@/components/Logo";
 import ThemeToggle from "@/components/ThemeToggle";
 import "@/styles/navbar.css";
 
@@ -23,8 +24,10 @@ export default function Navbar() {
         <nav className="navbar">
             <div className="container nav-content">
                 <Link href="/" className="logo">
-                    <span>THE</span>
-                    <span>DAILY TRUTH</span>
+                    <Logo size={34} />
+                    <span className="logo-wordmark">
+                        The Daily Truth<span className="logo-dot">.</span>
+                    </span>
                 </Link>
 
                 <div className="nav-links">

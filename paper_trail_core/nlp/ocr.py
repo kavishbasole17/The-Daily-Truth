@@ -22,12 +22,59 @@ the same pattern the NLI verifier uses when torch/transformers aren't usable
 from __future__ import annotations
 
 import logging
+import os
 import re
+import shutil
+import sys
 from dataclasses import dataclass
 
 from PIL import Image, ImageOps
 
 log = logging.getLogger(__name__)
+
+# Windows installers (winget's UB-Mannheim.TesseractOCR included) add
+# tesseract.exe to the *user* PATH via the registry, but that only takes
+# effect for processes started after the change — a `uvicorn --reload`
+# already running in an existing shell keeps its stale PATH until the shell
+# itself is restarted. Rather than depend on that timing, fall back to the
+# well-known install locations directly so a long-running dev server picks
+# up a fresh install without needing a restart.
+#
+# Separately, the stock Windows installer only ships eng.traineddata — the
+# Hindi pack this app needs (config.OCR_LANGS) commonly ends up hand-copied
+# into a user-writable mirror (e.g. %LOCALAPPDATA%\Tesseract-OCR\tessdata)
+# when the Program Files tessdata folder isn't writable without admin
+# rights. If that mirror exists and has the language file, prefer it.
+def _autoconfigure_windows() -> None:
+    if not sys.platform.startswith("win"):
+        return
+
+    import pytesseract
+
+    tess_cmd = shutil.which("tesseract")
+    if not tess_cmd:
+        for candidate in (
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        ):
+            if os.path.isfile(candidate):
+                pytesseract.pytesseract.tesseract_cmd = candidate
+                tess_cmd = candidate
+                log.info("ocr: found tesseract at %s (not on this process's PATH)", candidate)
+                break
+
+    if not tess_cmd or "TESSDATA_PREFIX" in os.environ:
+        return
+
+    user_tessdata = os.path.join(
+        os.environ.get("LOCALAPPDATA", ""), "Tesseract-OCR", "tessdata"
+    )
+    if os.path.isfile(os.path.join(user_tessdata, "hin.traineddata")):
+        os.environ["TESSDATA_PREFIX"] = user_tessdata
+        log.info("ocr: using tessdata mirror at %s", user_tessdata)
+
+
+_autoconfigure_windows()
 
 # Devanagari Unicode block (U+0900-U+097F) covers Hindi, Marathi, and others
 # written in the same script. Good enough to answer "was this Devanagari or
