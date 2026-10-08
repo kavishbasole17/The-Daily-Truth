@@ -287,3 +287,66 @@ def test_compact_drops_internal_fields():
     out = L.compact({"name": "Pune", "level": "city", "importance": 0.9, "osm_class": "x"})
     assert "importance" not in out and out["name"] == "Pune"
     assert L.compact(None) is None
+
+
+# ── Regressions found by measuring the locator on a labelled sample ───────────
+
+def test_longer_state_name_is_not_cut_down_to_a_country(fake_geocoder):
+    """'New South Wales' must not resolve to Wales."""
+    fake_geocoder["new south wales"] = [
+        _place("New South Wales", "state", state="New South Wales", country="Australia",
+               cc="au", importance=0.7)]
+    text = "Bushfires continue to burn in New South Wales, Australia."
+    loc = L.locate_text(text, [text]).claim_locations[0]
+    assert loc and loc["country_code"] == "au" and loc["name"] == "New South Wales"
+
+
+def test_an_institution_announcing_something_is_still_a_place(fake_geocoder):
+    """'announced' after a name marks a person ('Rahul announced'), not a university."""
+    fake_geocoder["university of cambridge"] = [
+        _place("University of Cambridge", "site", city="Cambridge", state="England",
+               country="United Kingdom", cc="gb", importance=0.0001)]
+    cands = L.extract_candidates("Scientists at the University of Cambridge announced the results.")
+    assert "University of Cambridge" in {c.surface for c in cands}
+    assert "Rahul Verma" not in {c.surface for c in
+                                 L.extract_candidates("A note from Rahul Verma said so.")}
+
+
+def test_a_renamed_city_is_matched_by_its_old_name(fake_geocoder):
+    fake_geocoder["aurangabad, maharashtra"] = [
+        dict(_place("Chhatrapati Sambhajinagar", "city", state="Maharashtra", importance=0.53),
+             names=["Chhatrapati Sambhajinagar", "Aurangabad"])]
+    text = "Aurangabad in Maharashtra saw record rain this week."
+    loc = L.locate_text(text, [text]).claim_locations[0]
+    assert loc and loc["state"] == "Maharashtra"
+
+
+def test_city_state_pattern_is_used_as_a_qualifier(fake_geocoder):
+    fake_geocoder["portland, oregon"] = [
+        _place("Portland", "city", state="Oregon", country="United States", cc="us", importance=0.6)]
+    fake_geocoder["portland"] = [
+        _place("Portland", "city", state="Maine", country="United States", cc="us", importance=0.55),
+        _place("Portland", "city", state="Oregon", country="United States", cc="us", importance=0.6)]
+    text = "Officials in Portland, Oregon closed the bridge on Monday."
+    loc = L.locate_text(text, [text]).claim_locations[0]
+    assert loc and loc["state"] == "Oregon"
+
+
+def test_locality_in_city_is_resolved_together(fake_geocoder):
+    fake_geocoder["whitefield, bengaluru"] = [
+        _place("Whitefield", "locality", locality="Whitefield", city="Bengaluru",
+               state="Karnataka", importance=0.1)]
+    text = "Residents of Whitefield in Bengaluru protested against the water shortage."
+    loc = L.locate_text(text, [text]).claim_locations[0]
+    assert loc and loc["level"] == "locality" and loc["city"] == "Bengaluru"
+
+
+def test_two_cities_in_a_list_are_not_parent_and_child():
+    cands = L.extract_candidates("Protests spread to Delhi, Mumbai and Pune on Sunday.")
+    assert all(c.qualifier is None for c in cands)
+
+
+def test_regional_alias_resolves_to_its_canonical_place():
+    loc = L.locate_text("Heavy snowfall was reported across Kashmir on Sunday.",
+                        ["Heavy snowfall was reported across Kashmir on Sunday."]).claim_locations[0]
+    assert loc and loc["name"] == "Jammu and Kashmir" and loc["level"] == "state"

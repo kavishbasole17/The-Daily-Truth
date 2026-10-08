@@ -78,7 +78,8 @@ def _cache_dir() -> str:
 
 
 def _key(query: str, countrycodes: Optional[str]) -> str:
-    raw = f"{' '.join(query.lower().split())}|{(countrycodes or '').lower()}"
+    # "v2": results now carry alternative names (namedetails), so v1 entries are stale.
+    raw = f"v2|{' '.join(query.lower().split())}|{(countrycodes or '').lower()}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -149,8 +150,12 @@ def _normalise(raw: dict[str, Any]) -> dict[str, Any]:
             or addr.get("municipality"))
     locality = (addr.get("locality") or addr.get("suburb") or addr.get("neighbourhood")
                 or addr.get("quarter") or addr.get("residential") or addr.get("city_district"))
+    details = raw.get("namedetails") or {}
+    names = sorted({str(v).strip() for v in details.values() if v and str(v).strip()})
     return {
         "name": raw.get("name") or (raw.get("display_name") or "").split(",")[0].strip(),
+        # Every name the place is known by ("Aurangabad" for Chhatrapati Sambhajinagar).
+        "names": names,
         "display_name": raw.get("display_name", ""),
         "level": level_of(raw),
         "lat": float(raw["lat"]) if raw.get("lat") not in (None, "") else None,
@@ -195,7 +200,7 @@ def geocode(
     s = _settings()
     headers = {"User-Agent": getattr(s, "GEOCODER_USER_AGENT", "PaperTrail/2.0")}
     params = {"q": query, "format": "jsonv2", "addressdetails": 1,
-              "limit": max(limit, 1), "accept-language": "en"}
+              "limit": max(limit, 1), "accept-language": "en", "namedetails": 1}
     if countrycodes:
         params["countrycodes"] = countrycodes
 

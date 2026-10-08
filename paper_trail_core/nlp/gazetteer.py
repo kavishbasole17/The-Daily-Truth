@@ -75,7 +75,8 @@ _IN_STATES = [
     "Andaman and Nicobar Islands", "Lakshadweep",
 ]
 _IN_STATE_ALIASES = {"orissa": "Odisha", "nct of delhi": "Delhi", "new delhi": "Delhi",
-                     "pondicherry": "Puducherry", "j&k": "Jammu and Kashmir"}
+                     "pondicherry": "Puducherry", "j&k": "Jammu and Kashmir",
+                     "kashmir": "Jammu and Kashmir", "kashmir valley": "Jammu and Kashmir"}
 
 # city -> state
 _IN_CITIES: dict[str, str] = {

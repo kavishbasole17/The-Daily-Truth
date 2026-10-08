@@ -71,6 +71,7 @@ def _min_confidence() -> float:
 
 # ── Candidate extraction ──────────────────────────────────────────────────────
 
+_CONNECTORS = frozenset("of de del da la le al el upon".split())
 _WORD = r"[A-Z][A-Za-z'’\-]*"
 _RUN_RE = re.compile(
     rf"(?<![\w'’]){_WORD}(?:\s+(?:(?:of|de|del|da|la|le|al|el|upon)\s+)?{_WORD}){{0,3}}"
@@ -102,6 +103,10 @@ _SITE_WORDS_RE = re.compile(
     r"highway|junction|square|lake|river|beach|garden|gardens|nagar|colony)\b",
     re.IGNORECASE,
 )
+# "South Wales", "West Virginia", "North Korea": a country or state name directly
+# after one of these is the tail of a longer name, not the place it spells.
+_NAME_PREFIXES = frozenset("new north south east west northern southern eastern western "
+                           "central upper lower greater great old saint st san los las".split())
 _ORG_SUFFIX = frozenset("ltd inc corp party bank ministry council committee commission "
                         "association agency authority board".split())
 _HONORIFICS = frozenset("mr mrs ms dr shri smt prof sir madam hon".split())
@@ -139,9 +144,12 @@ def _trim_run(words: list[str]) -> list[str]:
     """
     if [w.lower() for w in words[:2]] == ["the", "hague"]:
         return words
-    while words and words[0].lower() in gazetteer.NOT_PLACE_WORDS:
+    # Connectors ("of", "de") only belong between two name words, so one left at
+    # an edge after trimming ("Residents of Whitefield" -> "of Whitefield") goes too.
+    edge = gazetteer.NOT_PLACE_WORDS | _CONNECTORS
+    while words and words[0].lower() in edge:
         words = words[1:]
-    while words and words[-1].lower() in gazetteer.NOT_PLACE_WORDS:
+    while words and words[-1].lower() in edge:
         words = words[:-1]
     return words
 
@@ -210,6 +218,9 @@ def extract_candidates(text: str) -> list[Candidate]:
     gaz_spans = _gazetteer_matches(text)
     for start, end, entry in gaz_spans:
         before = text[max(0, start - 40):start]
+        prev = before.split()[-1].lower().strip(".,;:()") if before.split() else ""
+        if entry.level in ("country", "state") and prev in _NAME_PREFIXES and before.endswith(" "):
+            continue                   # let the full capitalised run ("New South Wales") stand
         cue = bool(_CUE_PRE_RE.search(before)) or bool(_CUE_POST_RE.match(text[end:end + 30]))
         add(text[start:end], start, cue=cue, gaz=entry)
 
@@ -225,16 +236,22 @@ def extract_candidates(text: str) -> list[Candidate]:
             continue
         if len(norm_words) == 1 and (len(norm_words[0]) < 3 or surface.isupper()):
             continue                      # acronyms (WHO, FBI) are not places
-        start = run.start()
-        before = text[max(0, run.start() - 40):run.start()]
-        after = text[run.end():run.end() + 30]
+        # Cues are judged around the *trimmed* name: after "Residents of Whitefield"
+        # loses its first word, "Residents of" is the cue, not part of the name.
+        raw = run.group(0)
+        start = run.start() + raw.find(words[0])
+        end = run.start() + raw.rfind(words[-1]) + len(words[-1])
+        before = text[max(0, start - 40):start]
+        after = text[end:end + 30]
         cue = bool(_CUE_PRE_RE.search(before)) or bool(_CUE_POST_RE.match(after))
         if not cue:
             continue
         prev_word = before.split()[-1].lower().strip(".,") if before.split() else ""
         next_word = after.split()[0].lower().strip(".,;:") if after.split() else ""
-        if prev_word in _HONORIFICS or next_word in _SPEECH_VERBS:
+        if prev_word in _HONORIFICS:
             continue
+        if next_word in _SPEECH_VERBS and not _SITE_WORDS_RE.search(surface):
+            continue                   # "Rahul said ..." is a person; "the University announced" is a place
         if _norm(surface) in found:
             # Gazetteer names were already counted by the gazetteer scan above.
             if found[_norm(surface)].gaz is None:
@@ -247,12 +264,19 @@ def extract_candidates(text: str) -> list[Candidate]:
     for cand in ordered:
         if cand.gaz is not None and cand.gaz.level in ("country", "state"):
             continue
-        m = re.search(re.escape(cand.surface) + r"\s*,\s*(" + _WORD + r"(?:\s+" + _WORD + r")*)",
-                      text)
+        m = re.search(
+            re.escape(cand.surface) + r"(?:(\s*,\s*)|\s+in\s+)(" + _WORD + r"(?:\s+" + _WORD + r")*)",
+            text,
+        )
         if m:
-            nxt = _norm(m.group(1))
-            if nxt in found and _norm(found[nxt].surface) != _norm(cand.surface):
-                cand.qualifier = found[nxt].surface
+            q = " ".join(_trim_run(m.group(2).split()))
+            entry = gazetteer.lookup(q) if q else None
+            # "Delhi, Mumbai" is a list of two cities, not a place and its parent;
+            # "Koregaon Park, Pune" (a locality, then its city) is.
+            sibling_city = (m.group(1) is not None and entry is not None and entry.level == "city"
+                            and cand.gaz is not None and cand.gaz.level == "city")
+            if q and _norm(q) != _norm(cand.surface) and not sibling_city:
+                cand.qualifier = q
 
     def priority(c: Candidate):
         return (not c.dateline, c.gaz is None, -c.count, c.first_pos)
@@ -279,6 +303,8 @@ def build_context(candidates: list[Candidate], url: Optional[str],
         # state ("Aurangabad" -> Maharashtra) is an assumption, not evidence, so
         # it must not vote; countries and states named in the text do.
         ctx.names.add(_norm(c.surface))
+        if c.qualifier:
+            ctx.names.add(_norm(c.qualifier))
         if c.gaz is not None and c.gaz.level in ("country", "state"):
             ctx.countries[c.gaz.country_code] = ctx.countries.get(c.gaz.country_code, 0) + c.count
     if url:
@@ -304,7 +330,7 @@ _GENERIC_SUFFIX = ("district", "city", "town", "village", "division", "region", 
 
 def _name_match(cand_norm: str, result: dict) -> float:
     name = _norm(result.get("name") or "")
-    if cand_norm == name:
+    if cand_norm == name or cand_norm in {_norm(n) for n in result.get("names", [])}:
         return 1.0
     for suffix in _GENERIC_SUFFIX:
         if cand_norm == f"{name} {suffix}" or name == f"{cand_norm} {suffix}":
@@ -317,8 +343,9 @@ def _name_match(cand_norm: str, result: dict) -> float:
     return 0.0
 
 
-def _score(cand: Candidate, result: dict, ctx: Context) -> float:
-    name = _name_match(_norm(cand.surface), result)
+def _score(cand: Candidate, result: dict, ctx: Context,
+           names: Optional[set] = None) -> float:
+    name = max(_name_match(n, result) for n in (names or {_norm(cand.surface)}))
     if name == 0.0:
         return 0.0
     importance = min(1.0, float(result.get("importance") or 0.0) / 0.6)
@@ -330,6 +357,10 @@ def _score(cand: Candidate, result: dict, ctx: Context) -> float:
         if v and _norm(v) in ctx.names and _norm(v) != own:
             hier_ctx = 1.0
             break
+    if cand.qualifier:
+        parents = {_norm(result.get(k) or "") for k in ("city", "district", "state", "country")}
+        if _norm(cand.qualifier) in parents:
+            hier_ctx = 1.0                     # "Aurangabad in Bihar" -> the Bihar one
     context = min(1.0, 0.6 * country_ctx + 0.7 * hier_ctx)
     cue = 1.0 if (cand.cue or cand.gaz is not None) else 0.0
     return (_W_NAME * name + _W_IMPORTANCE * importance
@@ -382,25 +413,31 @@ def _resolve(cand: Candidate, ctx: Context, budget: "Budget") -> Optional[dict]:
     if cand.gaz is not None and not cand.cue and ambiguous_name:
         return None                         # "Salem" with no place cue is a name, not a place
 
+    # A gazetteer entry knows the canonical name ("Kashmir" -> "Jammu and Kashmir"),
+    # which is what the geocoder should be asked for.
+    surface = cand.gaz.name if cand.gaz is not None else cand.surface
+    names = {_norm(cand.surface), _norm(surface)}
+
     results: list[dict] = []
     if budget.can_geocode():
-        query = f"{cand.surface}, {cand.qualifier}" if cand.qualifier else cand.surface
+        query = f"{surface}, {cand.qualifier}" if cand.qualifier else surface
         try:
             results = geocode(query, limit=6)
             if not results and cand.qualifier:
-                results = geocode(cand.surface, limit=6)
+                results = geocode(surface, limit=6)
         except GeocoderUnavailable:
             budget.geocoder_down = True
             results = []
 
     if results:
-        scored = sorted(((_score(cand, r, ctx), r) for r in results), key=lambda t: -t[0])
+        scored = sorted(((_score(cand, r, ctx, names), r) for r in results), key=lambda t: -t[0])
         best_score, best = scored[0]
         if best_score > 0.0:
             # A gazetteer entry pins the country: prefer a result that agrees with it.
             if cand.gaz is not None:
                 agree = [(s, r) for s, r in scored
                          if r.get("country_code") == cand.gaz.country_code and s > 0]
+                agree.sort(key=lambda t: (t[1].get("level") != cand.gaz.level, -t[0]))
                 if agree:
                     best_score, best = agree[0]
             rival = next((s for s, r in scored[1:] if _area(r) != _area(best) and s > 0), None)
