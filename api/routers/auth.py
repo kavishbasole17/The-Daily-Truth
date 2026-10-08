@@ -29,7 +29,7 @@ def login(req: LoginRequest) -> TokenResponse:
 
     **Demo credentials** (change in production):
     - `admin` / `admin123`  — full access
-    - `analyst` / `analyst123`  — can resolve review-queue items
+    - `analyst` / `analyst123`  — same access as admin
 
     Include the token in subsequent requests:
     ```

@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
 from api.database import get_db
-from api.orm import Article, ReviewQueue, Verdict
+from api.orm import Article, Verdict
 from paper_trail_core.agents.pipeline import run_verification_pipeline, run_verification_pipeline_image
 
 log = logging.getLogger(__name__)
@@ -105,7 +105,6 @@ class VerdictOut(BaseModel):
     claim_verdicts:     list[ClaimVerdictOut]
     ensemble_score:     float
     reasoning_trace:    str
-    needs_human_review: bool
     ai_model_version:   Optional[str]
     created_at:         str
     fused_score:        Optional[float] = None
@@ -142,7 +141,6 @@ def _build_article_out(article: Article) -> ArticleOut:
             claim_verdicts=[ClaimVerdictOut(**cv) for cv in cvs_raw],
             ensemble_score=v.ensemble_score,
             reasoning_trace=v.reasoning_trace,
-            needs_human_review=v.needs_human_review,
             ai_model_version=v.ai_model_version,
             created_at=v.created_at.isoformat(),
             fused_score=getattr(v, "fused_score", None),
@@ -191,17 +189,11 @@ def _run_pipeline_job(article_id: int, text: str, url: Optional[str]) -> None:
             claim_verdicts=vr.claim_verdicts_json(),
             ensemble_score=vr.ensemble_score,
             reasoning_trace=vr.reasoning_trace,
-            needs_human_review=vr.needs_human_review,
             degradations=vr.degradations_json(),
             fused_score=vr.fused_score,
             ai_model_version=AI_MODEL_VERSION,
         )
         db.add(verdict)
-        db.flush()
-
-        if vr.needs_human_review:
-            db.add(ReviewQueue(article_id=article_id, verdict_id=verdict.id))
-            log.info("pipeline job: article_id=%d flagged for human review", article_id)
 
         article.status = "completed"
         article.stage = None
@@ -260,17 +252,11 @@ def _run_pipeline_image_job(article_id: int, image_path: str, url: Optional[str]
             claim_verdicts=vr.claim_verdicts_json(),
             ensemble_score=vr.ensemble_score,
             reasoning_trace=vr.reasoning_trace,
-            needs_human_review=vr.needs_human_review,
             degradations=vr.degradations_json(),
             fused_score=vr.fused_score,
             ai_model_version=AI_MODEL_VERSION,
         )
         db.add(verdict)
-        db.flush()
-
-        if vr.needs_human_review:
-            db.add(ReviewQueue(article_id=article_id, verdict_id=verdict.id))
-            log.info("pipeline job (image): article_id=%d flagged for human review", article_id)
 
         article.status = "completed"
         article.stage = None
@@ -331,8 +317,8 @@ def submit_article(
       5. Fuses both signals into a calibrated verdict, abstaining when the
          evidence does not support a confident answer
 
-    Articles the system will not commit to are flagged
-    `needs_human_review=true` and added to the review queue.
+    Articles the system will not commit to come back as `uncertain`, with the
+    reason in `reasoning_trace` and `degradations`.
 
     **Requires Bearer token** — obtain one at `POST /auth/token`.
     """
@@ -367,8 +353,8 @@ async def submit_article_image(
     `paper_trail_core/agents/ocr_agent.py`) to recover the article text, then
     feeds the transcription through the same evidence-grounded pipeline used
     by `POST /articles/submit`. If OCR confidence falls below the configured
-    floor, the pipeline abstains and flags the article for human review
-    rather than verifying a possibly-wrong transcription.
+    floor, the pipeline abstains (`uncertain`) rather than verifying a
+    possibly-wrong transcription.
 
     Returns **202 Accepted** immediately; poll `GET /articles/{id}` exactly as
     for a text submission — the recovered text appears in `text_preview` once

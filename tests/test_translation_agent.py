@@ -131,7 +131,6 @@ def test_unsupported_language_never_reaches_fusion(monkeypatch):
     monkeypatch.setattr(TA, "_llm_translate", _raise_if_called)
     result = P.run_verification_pipeline(FRENCH_ARTICLE)
     assert result.verdict == "uncertain"
-    assert result.needs_human_review is True
     assert result.fusion_method == "not_run"
     assert any(d["stage"] == "translation" for d in result.degradations)
 

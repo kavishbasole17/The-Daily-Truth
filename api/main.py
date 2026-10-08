@@ -21,8 +21,6 @@ New endpoints (agentic pipeline + persistence):
     POST /articles/submit          Run verification pipeline, persist result  [auth required]
     POST /articles/submit-image    OCR an image, then run verification pipeline [auth required]
     GET  /articles/{id}            Retrieve stored article + verdict
-    GET  /review-queue             Articles flagged needs_human_review (paginated)
-    POST /review-queue/{id}/resolve  Analyst manual verdict override          [auth required]
     GET  /models/registry          Benchmark data from registry.json
 """
 
@@ -55,7 +53,6 @@ except ImportError:  # pragma: no cover
     settings = None
 from api.routers import auth as auth_router
 from api.routers import articles as articles_router
-from api.routers import review_queue as rq_router
 from api.routers import model_registry as reg_router
 
 logging.basicConfig(
@@ -150,7 +147,6 @@ app.add_middleware(
 # ── New routers ────────────────────────────────────────────────────────────────
 app.include_router(auth_router.router)
 app.include_router(articles_router.router)
-app.include_router(rq_router.router)
 app.include_router(reg_router.router)
 
 

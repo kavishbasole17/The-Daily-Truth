@@ -32,7 +32,6 @@ def _make_state(**kwargs) -> PipelineState:
         "final_verdict": "uncertain",
         "final_confidence": 0.0,
         "reasoning_trace": "",
-        "needs_human_review": False,
         "error": None,
     }
     defaults.update(kwargs)

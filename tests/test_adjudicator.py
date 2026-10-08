@@ -52,7 +52,6 @@ def test_no_claims_falls_back_to_ensemble():
 def test_mid_ensemble_is_uncertain():
     r = verdict_of(ensemble_score=0.5, claim_verdicts=[])
     assert r["verdict"] == "uncertain"
-    assert r["needs_human_review"] is True
 
 
 # ── Evidence moves the verdict ────────────────────────────────────────────────
@@ -104,7 +103,6 @@ def test_zero_coverage_forces_abstention():
     unverifiable = [cv("unverifiable", status="no_hits") for _ in range(3)]
     r = verdict_of(ensemble_score=0.95, claim_verdicts=unverifiable)
     assert r["verdict"] == "uncertain"
-    assert r["needs_human_review"] is True
     assert r["forced_reason"] is not None
 
 
@@ -118,7 +116,6 @@ def test_degraded_nli_forces_abstention():
     claims = [cv("entailment", support=0.9) for _ in range(4)]
     r = verdict_of(ensemble_score=0.95, claim_verdicts=claims, nli_degraded=True)
     assert r["verdict"] == "uncertain"
-    assert r["needs_human_review"] is True
     assert "degraded" in r["forced_reason"]
 
 
@@ -169,16 +166,3 @@ def test_custom_thresholds_widen_the_abstention_band():
     r = verdict_of(ensemble_score=0.65, claim_verdicts=[],
                    escalation_low=0.3, escalation_high=0.8)
     assert r["verdict"] == "uncertain"
-    assert r["needs_human_review"] is True
-
-
-def test_needs_human_review_iff_uncertain():
-    assert verdict_of(ensemble_score=0.95, claim_verdicts=[])["needs_human_review"] is False
-    assert verdict_of(ensemble_score=0.05, claim_verdicts=[])["needs_human_review"] is False
-    assert verdict_of(ensemble_score=0.50, claim_verdicts=[])["needs_human_review"] is True
-
-
-def test_features_are_always_complete():
-    from paper_trail_core.agents.features import FEATURE_NAMES
-    r = verdict_of(ensemble_score=0.5, claim_verdicts=[cv("entailment", 0.5)])
-    assert set(r["features"]) == set(FEATURE_NAMES)

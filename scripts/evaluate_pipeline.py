@@ -146,7 +146,6 @@ def run_one(row: dict[str, Any], use_cache: bool = True) -> dict[str, Any]:
         "verdict": vr.verdict, "confidence": vr.confidence,
         "fused_score": vr.fused_score, "fusion_method": vr.fusion_method,
         "ensemble_score": vr.ensemble_score,
-        "needs_human_review": vr.needs_human_review,
         "n_claims": len(vr.claim_verdicts),
         "n_degradations": len(vr.degradations),
         "degradation_kinds": sorted({d["kind"] for d in vr.degradations}),
@@ -325,7 +324,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     md.append("\n## Verdicts as delivered (with abstention)\n\n")
     if dv.get("n"):
         md.append(f"- Committed on **{dv['coverage']:.1%}** of articles "
-                  f"({dv['abstained']} held for human review)\n")
+                  f"({dv['abstained']} abstained as uncertain)\n")
         md.append(f"- Accuracy on committed verdicts: **{dv['accuracy']:.3f}**\n")
         md.append(f"- Precision — fake: **{dv['fake']['precision']:.3f}**, "
                   f"real: **{dv['real']['precision']:.3f}**\n")

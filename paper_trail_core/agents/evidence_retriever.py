@@ -714,7 +714,7 @@ def retrieve_evidence_node(state: PipelineState) -> dict:
         degradations += degrade(
             "evidence_retriever", "no_evidence",
             "No relevant evidence was found for any claim. The verdict cannot be "
-            "evidence-grounded and will be held for human review. Note that "
+            "evidence-grounded and will be reported as uncertain. Note that "
             "absence of coverage is not evidence of fabrication — recent, "
             "regional and non-English topics are routinely missed by these sources.",
             severity="critical",

@@ -290,7 +290,7 @@ def verify_claims_node(state: PipelineState) -> dict:
             "The NLI model could not be loaded, so claim checking fell back to "
             "word-overlap matching. That heuristic cannot detect contradiction "
             "and has scored directly contradictory evidence as support, so this "
-            "run's evidence is not trusted and the verdict is held for review.",
+            "run's evidence is not trusted and the verdict is left uncertain.",
             severity="critical",
         )
     elif _BACKEND == "lexical":

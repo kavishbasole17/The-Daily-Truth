@@ -5,8 +5,8 @@ Turns the feature vector into a final verdict, and decides when *not* to give
 one.
 
 The abstention band is the point of this stage. A detector that must commit to
-every article ships confident errors; one that can say "uncertain" and route to
-a human keeps its committed verdicts trustworthy. The band's edges are chosen
+every article ships confident errors; one that can say "uncertain" and explain
+why keeps its committed verdicts trustworthy. The band's edges are chosen
 on held-out data to hold a target precision (config.TARGET_PRECISION), and the
 coverage that costs is measured and reported rather than hidden.
 
@@ -102,7 +102,7 @@ def _build_trace(
     ]
 
     if forced_reason:
-        lines.append(f"  Held for review: {forced_reason}")
+        lines.append(f"  Abstained: {forced_reason}")
 
     if claim_verdicts:
         lines += ["", "CLAIM-BY-CLAIM"]
@@ -169,7 +169,6 @@ def compute_verdict(
         "fused_score": round(p_real, 4),
         "fusion_method": method,
         "features": features,
-        "needs_human_review": verdict == "uncertain",
         "forced_reason": forced_reason,
         "thresholds": {"low": low, "high": high},
     }
@@ -199,7 +198,7 @@ def adjudicate_node(state: PipelineState) -> dict:
     if result["forced_reason"]:
         new_degradations += degrade(
             "adjudicator", "forced_abstention",
-            f"Verdict held for human review: {result['forced_reason']}.",
+            f"Abstained from a committed verdict: {result['forced_reason']}.",
         )
 
     trace = _build_trace(
@@ -210,9 +209,9 @@ def adjudicate_node(state: PipelineState) -> dict:
     )
 
     log.info(
-        "adjudicator: verdict=%s conf=%.4f p_real=%.4f method=%s review=%s",
+        "adjudicator: verdict=%s conf=%.4f p_real=%.4f method=%s",
         result["verdict"], result["confidence"], result["fused_score"],
-        result["fusion_method"], result["needs_human_review"],
+        result["fusion_method"],
     )
 
     return {
@@ -222,6 +221,5 @@ def adjudicate_node(state: PipelineState) -> dict:
         "fusion_features":    result["features"],
         "fusion_method":      result["fusion_method"],
         "reasoning_trace":    trace,
-        "needs_human_review": result["needs_human_review"],
         "degradations":       new_degradations,
     }

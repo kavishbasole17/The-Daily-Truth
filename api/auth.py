@@ -6,7 +6,7 @@ In production: replace DEMO_USERS with a DB lookup.
 
 Roles:
   admin   — full access
-  analyst — can resolve review-queue items
+  analyst — same access as admin (kept for existing demo logins)
   public  — read-only (no auth required for GET endpoints)
 """
 from __future__ import annotations

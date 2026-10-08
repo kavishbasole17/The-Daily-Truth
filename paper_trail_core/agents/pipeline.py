@@ -22,7 +22,7 @@ Graph:
 Every node runs behind a stage guard: a timeout and a defined fallback state.
 A stage that hangs or throws degrades that stage only, records why, and lets
 the rest of the pipeline finish — so a search provider going down produces an
-honest "couldn't verify, held for review" instead of a 500 or, worse, a
+honest "couldn't verify" instead of a 500 or, worse, a
 confident verdict computed from nothing. A failed/low-confidence OCR read or
 an untranslatable/unsupported-language input is routed straight to a
 dedicated `abstain` terminal node instead of into extract_claims — see
@@ -126,8 +126,7 @@ def _abstain_node(state: PipelineState) -> dict:
         "fused_score": 0.5,
         "fusion_features": {},
         "fusion_method": "not_run",
-        "reasoning_trace": f"Held for human review: {detail}",
-        "needs_human_review": True,
+        "reasoning_trace": f"Could not verify: {detail}",
     }
 
 
@@ -167,8 +166,7 @@ def _fallback_adjudicate(_state: PipelineState) -> dict:
         "fused_score": 0.5,
         "fusion_features": {},
         "fusion_method": "failed",
-        "reasoning_trace": "Adjudication failed; verdict held for human review.",
-        "needs_human_review": True,
+        "reasoning_trace": "Adjudication failed; no verdict could be reached.",
     }
 
 
@@ -291,7 +289,6 @@ class VerdictResult:
     claim_verdicts: list[ClaimVerdict]
     ensemble_score: float
     reasoning_trace: str
-    needs_human_review: bool
     fused_score: float = 0.5
     fusion_method: str = "heuristic_fallback"
     fusion_features: dict = field(default_factory=dict)
@@ -310,7 +307,6 @@ class VerdictResult:
             "claim_verdicts":     list(self.claim_verdicts),
             "ensemble_score":     self.ensemble_score,
             "reasoning_trace":    self.reasoning_trace,
-            "needs_human_review": self.needs_human_review,
             "fused_score":        self.fused_score,
             "fusion_method":      self.fusion_method,
             "fusion_features":    self.fusion_features,
@@ -331,7 +327,7 @@ class VerdictResult:
 def _guarded_result(verdict: str, trace: str, degradations: list[Degradation]) -> VerdictResult:
     return VerdictResult(
         verdict=verdict, confidence=0.0, claim_verdicts=[], ensemble_score=0.5,
-        reasoning_trace=trace, needs_human_review=True, fused_score=0.5,
+        reasoning_trace=trace, fused_score=0.5,
         fusion_method="not_run", degradations=degradations,
     )
 
@@ -362,7 +358,6 @@ def _base_state(url: Optional[str]) -> dict:
         "fusion_features":   {},
         "fusion_method":     "heuristic_fallback",
         "reasoning_trace":   "",
-        "needs_human_review": True,
         "degradations":      [],
         "error":             None,
     }
@@ -395,7 +390,6 @@ def _run_graph(initial_state: PipelineState) -> VerdictResult:
         claim_verdicts=result_state.get("claim_verdicts", []),
         ensemble_score=result_state.get("ensemble_score", 0.5),
         reasoning_trace=result_state.get("reasoning_trace", ""),
-        needs_human_review=result_state.get("needs_human_review", True),
         fused_score=result_state.get("fused_score", 0.5),
         fusion_method=result_state.get("fusion_method", "heuristic_fallback"),
         fusion_features=result_state.get("fusion_features", {}),
@@ -413,7 +407,7 @@ def run_verification_pipeline(
     Run the full multi-agent verification pipeline over plain text.
 
     Never raises and never returns a confident verdict it cannot justify: any
-    failure path yields `uncertain` with `needs_human_review=True` and a
+    failure path yields `uncertain` with a
     populated degradation list explaining what went wrong.
     """
     text = (article_text or "").strip()

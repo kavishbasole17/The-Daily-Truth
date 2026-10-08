@@ -147,8 +147,8 @@ def translate_node(state: PipelineState) -> dict:
             "degradations": degrade(
                 "translation", "unsupported_language",
                 f"Detected language '{lang}' (confidence {conf:.2f}) is not "
-                "supported yet — only English and Hindi are. Held for human "
-                "review rather than verified with English-tuned models.",
+                "supported yet — only English and Hindi are. The verdict is "
+                "uncertain rather than computed with English-tuned models.",
                 severity="critical",
             ),
         }
@@ -163,7 +163,7 @@ def translate_node(state: PipelineState) -> dict:
             "degradations": degrade(
                 "translation", "backend_off",
                 "Translation is disabled (TRANSLATION_BACKEND=off); Hindi "
-                "input cannot be processed and is held for human review.",
+                "input cannot be processed; the verdict is uncertain.",
                 severity="critical",
             ),
         }
@@ -181,7 +181,7 @@ def translate_node(state: PipelineState) -> dict:
             "degradations": degrade(
                 "translation", "backend_not_implemented",
                 "TRANSLATION_BACKEND=indictrans2 is configured but not yet "
-                "implemented. Held for human review.", severity="critical",
+                "implemented. The verdict is uncertain.", severity="critical",
             ),
         }
 
@@ -196,8 +196,8 @@ def translate_node(state: PipelineState) -> dict:
             "article_text": "",
             "degradations": degrade(
                 "translation", "llm_failed",
-                f"Translation failed ({type(exc).__name__}). Held for human "
-                "review rather than verified untranslated.", severity="critical",
+                f"Translation failed ({type(exc).__name__}). The verdict is "
+                "uncertain rather than computed on untranslated text.", severity="critical",
             ),
         }
 

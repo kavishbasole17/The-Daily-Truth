@@ -83,7 +83,7 @@ def ocr_node(state: PipelineState) -> dict:
             "degradations": degrade(
                 "ocr", "backend_off",
                 "OCR is disabled (OCR_BACKEND=off); image submissions cannot "
-                "be processed and are held for human review.",
+                "be processed; the verdict is uncertain.",
                 severity="critical",
             ),
         }
@@ -115,8 +115,8 @@ def ocr_node(state: PipelineState) -> dict:
             "article_text": "",
             "degradations": degrade(
                 "ocr", "extraction_failed",
-                f"OCR extraction failed ({type(exc).__name__}); image held for "
-                "human review rather than guessed at.",
+                f"OCR extraction failed ({type(exc).__name__}); the image was not "
+                "guessed at, and the verdict is uncertain.",
                 severity="critical",
             ),
         }
@@ -133,7 +133,7 @@ def ocr_node(state: PipelineState) -> dict:
                 "ocr", "low_confidence",
                 f"OCR confidence ({result.confidence:.2f}) fell below the "
                 f"{_CONF_MIN:.2f} floor. Rather than verify a possibly-wrong "
-                "transcription, this image is held for human review.",
+                "transcription, the verdict is left uncertain.",
                 severity="critical",
             ),
         }

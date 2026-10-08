@@ -120,7 +120,6 @@ _MOCK_VERDICT = {
     ],
     "ensemble_score": 0.72,
     "reasoning_trace": "Ensemble score 0.72. NLI: 1 supporting. Combined: 0.75.",
-    "needs_human_review": False,
 }
 
 
@@ -147,7 +146,6 @@ def test_submit_and_retrieve_article(client, admin_token):
         claim_verdicts=_MOCK_VERDICT["claim_verdicts"],
         ensemble_score=0.72,
         reasoning_trace="Test trace.",
-        needs_human_review=False,
     )
 
     with patch("api.routers.articles.run_verification_pipeline", return_value=mock_vr):
@@ -173,7 +171,7 @@ def test_submit_and_retrieve_article(client, admin_token):
     assert done["status"] == "completed"
     assert done["verdict"]["verdict"] == "likely_real"
     assert done["verdict"]["ensemble_score"] == pytest.approx(0.72, abs=1e-4)
-    assert done["verdict"]["needs_human_review"] is False
+    assert "needs_human_review" not in done["verdict"]
 
 
 def test_get_article_not_found(client):
@@ -181,7 +179,7 @@ def test_get_article_not_found(client):
     assert resp.status_code == 404
 
 
-def test_submit_uncertain_creates_review_queue_item(client, admin_token):
+def test_submit_uncertain_verdict_is_returned_without_review_queue(client, admin_token):
     from paper_trail_core.agents.pipeline import VerdictResult
 
     mock_vr = VerdictResult(
@@ -190,7 +188,6 @@ def test_submit_uncertain_creates_review_queue_item(client, admin_token):
         claim_verdicts=[],
         ensemble_score=0.5,
         reasoning_trace="Unable to determine.",
-        needs_human_review=True,
     )
 
     with patch("api.routers.articles.run_verification_pipeline", return_value=mock_vr):
@@ -205,106 +202,18 @@ def test_submit_uncertain_creates_review_queue_item(client, admin_token):
 
     done = client.get(f"/articles/{article_id}").json()
     assert done["status"] == "completed"
-    assert done["verdict"]["needs_human_review"] is True
-
-    # Should appear in review queue
-    rq_resp = client.get("/review-queue")
-    assert rq_resp.status_code == 200
-    items = rq_resp.json()["items"]
-    assert len(items) >= 1
+    assert done["verdict"]["verdict"] == "uncertain"
+    assert "needs_human_review" not in done["verdict"]
 
 
-# ── Review-queue endpoints ─────────────────────────────────────────────────────
-
-def test_review_queue_no_auth_allowed(client):
-    resp = client.get("/review-queue")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert "items" in body
-    assert "total" in body
-    assert "pages" in body
-
-
-def test_resolve_requires_auth(client):
-    resp = client.post("/review-queue/1/resolve",
-                       json={"human_verdict": "likely_fake"})
-    assert resp.status_code == 401
-
-
-def test_resolve_queue_item(client, analyst_token, admin_token):
-    """Submit an uncertain article, then resolve it as an analyst."""
-    from paper_trail_core.agents.pipeline import VerdictResult
-
-    mock_vr = VerdictResult(
-        verdict="uncertain",
-        confidence=0.05,
-        claim_verdicts=[],
-        ensemble_score=0.5,
-        reasoning_trace="Uncertain.",
-        needs_human_review=True,
-    )
-
-    with patch("api.routers.articles.run_verification_pipeline", return_value=mock_vr):
-        submit_resp = client.post(
-            "/articles/submit",
-            json={"text": "Controversial claim that needs review."},
-            headers={"Authorization": f"Bearer {admin_token}"},
-        )
-    assert submit_resp.status_code == 202
-
-    # Find the queued item
-    rq_resp = client.get("/review-queue?status=pending")
-    assert rq_resp.status_code == 200
-    items = rq_resp.json()["items"]
-    assert items, "Expected at least one pending item"
-    queue_id = items[0]["id"]
-
-    # Resolve it
-    resolve_resp = client.post(
-        f"/review-queue/{queue_id}/resolve",
-        json={"human_verdict": "likely_fake", "human_notes": "Checked manually."},
-        headers={"Authorization": f"Bearer {analyst_token}"},
-    )
-    assert resolve_resp.status_code == 200
-    body = resolve_resp.json()
-    assert body["human_verdict"] == "likely_fake"
-    assert body["status"] == "resolved"
-
-
-def test_resolve_already_resolved_returns_409(client, analyst_token, admin_token):
-    from paper_trail_core.agents.pipeline import VerdictResult
-
-    mock_vr = VerdictResult(
-        verdict="uncertain", confidence=0.0, claim_verdicts=[],
-        ensemble_score=0.5, reasoning_trace="", needs_human_review=True,
-    )
-
-    with patch("api.routers.articles.run_verification_pipeline", return_value=mock_vr):
-        submit_resp = client.post(
-            "/articles/submit",
-            json={"text": "Another uncertain article for double-resolve test."},
-            headers={"Authorization": f"Bearer {admin_token}"},
-        )
-    assert submit_resp.status_code == 202
-
-    rq_resp = client.get("/review-queue?status=pending")
-    items = rq_resp.json()["items"]
-    queue_id = items[0]["id"]
-
-    # First resolve — should succeed
-    client.post(
-        f"/review-queue/{queue_id}/resolve",
-        json={"human_verdict": "likely_real"},
-        headers={"Authorization": f"Bearer {analyst_token}"},
-    )
-
-    # Second resolve — should 409
+def test_review_queue_endpoints_are_gone(client, admin_token):
+    assert client.get("/review-queue").status_code == 404
     resp = client.post(
-        f"/review-queue/{queue_id}/resolve",
+        "/review-queue/1/resolve",
         json={"human_verdict": "likely_fake"},
-        headers={"Authorization": f"Bearer {analyst_token}"},
+        headers={"Authorization": f"Bearer {admin_token}"},
     )
-    assert resp.status_code == 409
+    assert resp.status_code == 404
 
 
 # ── Model registry endpoint ────────────────────────────────────────────────────

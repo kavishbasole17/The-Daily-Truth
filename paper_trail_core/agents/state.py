@@ -54,8 +54,8 @@ class PipelineState(TypedDict):
     ocr_script: Optional[str]           # detected script, e.g. "Devanagari", "Latin"
 
     # Populated by translation_agent. original_text is the text exactly as
-    # received (post-OCR for image input) — never discarded, so a human
-    # reviewer or a future non-English-aware stage can still see it even
+    # received (post-OCR for image input) — never discarded, so a later
+    # non-English-aware stage (or a caller inspecting the result) can still see it even
     # after article_text has been overwritten with the English translation.
     detected_language: Optional[str]        # ISO 639-1, e.g. "en", "hi", "unknown"
     language_confidence: Optional[float]
@@ -84,7 +84,6 @@ class PipelineState(TypedDict):
     fusion_features: dict[str, float]
     fusion_method: str              # learned | heuristic_fallback
     reasoning_trace: str
-    needs_human_review: bool
 
     # Accumulated across every node. The reducer matters: LangGraph *overwrites*
     # state keys returned by a node unless one is declared, so without

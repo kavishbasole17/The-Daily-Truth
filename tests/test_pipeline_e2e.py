@@ -90,7 +90,6 @@ def assert_contract(vr):
         assert isinstance(cv.get("evidence_snippets"), list)
         assert all(isinstance(s, str) for s in cv["evidence_snippets"])
     assert isinstance(vr.reasoning_trace, str) and vr.reasoning_trace
-    assert isinstance(vr.needs_human_review, bool)
     assert isinstance(vr.degradations, list)
 
 
@@ -135,7 +134,6 @@ def test_degraded_nli_never_commits(monkeypatch):
 
     vr = P.run_verification_pipeline(REAL_ARTICLE)
     assert vr.verdict == "uncertain"
-    assert vr.needs_human_review is True
     assert any(d["kind"] == "nli_fallback_lexical" for d in vr.degradations)
 
 
@@ -146,8 +144,7 @@ def test_no_evidence_does_not_produce_likely_fake(monkeypatch):
                                       "cache_hits": 0, "queries": 2})
     stub_nli(monkeypatch)
     vr = P.run_verification_pipeline(REAL_ARTICLE)
-    assert vr.verdict != "likely_fake"
-    assert vr.needs_human_review is True
+    assert vr.verdict == "uncertain"
 
 
 # ── Robustness ────────────────────────────────────────────────────────────────
@@ -155,7 +152,6 @@ def test_no_evidence_does_not_produce_likely_fake(monkeypatch):
 def test_short_input_is_rejected_without_a_verdict():
     vr = P.run_verification_pipeline("Too short.")
     assert vr.verdict == "uncertain"
-    assert vr.needs_human_review is True
     assert vr.degradations
 
 
@@ -169,7 +165,7 @@ def test_stage_failure_is_contained_and_reported(monkeypatch):
     vr = P.run_verification_pipeline(REAL_ARTICLE)
     try:
         assert_contract(vr)
-        assert vr.needs_human_review is True
+        assert vr.verdict == "uncertain"
         assert any(d["severity"] == "critical" for d in vr.degradations)
     finally:
         P._app = None

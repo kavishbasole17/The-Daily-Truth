@@ -109,7 +109,6 @@ def test_low_confidence_ocr_never_reaches_fusion(monkeypatch):
     )
     result = P.run_verification_pipeline_image("fake.png")
     assert result.verdict == "uncertain"
-    assert result.needs_human_review is True
     assert result.fusion_method == "not_run"
 
 
@@ -119,7 +118,6 @@ def test_ocr_failure_never_reaches_fusion(monkeypatch):
     monkeypatch.setattr(OA, "run_ocr", _boom)
     result = P.run_verification_pipeline_image("missing.png")
     assert result.verdict == "uncertain"
-    assert result.needs_human_review is True
     assert result.fusion_method == "not_run"
     assert any(d["stage"] == "ocr" for d in result.degradations)
 
@@ -127,7 +125,6 @@ def test_ocr_failure_never_reaches_fusion(monkeypatch):
 def test_no_image_path_abstains_without_touching_ocr():
     result = P.run_verification_pipeline_image("")
     assert result.verdict == "uncertain"
-    assert result.needs_human_review is True
 
 
 def test_good_ocr_reaches_claim_extraction(monkeypatch):
