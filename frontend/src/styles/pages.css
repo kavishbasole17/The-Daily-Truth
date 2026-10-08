@@ -291,16 +291,6 @@
     color:var(--yellow);
 }
 
-.review-flag{
-    display:inline-flex;
-    align-items:center;
-    gap:6px;
-    margin-top:10px;
-    color:var(--yellow2);
-    font-size:.85rem;
-    font-weight:600;
-}
-
 .verdict-card h2{
     margin-bottom:6px;
     color:var(--text);
@@ -832,6 +822,18 @@
     font-weight:600;
     letter-spacing:.02em;
     vertical-align:baseline;
+}
+
+.evidence-local{
+    background:rgba(34,197,94,.14);
+    border-color:rgba(34,197,94,.35);
+}
+
+.claim-location{
+    margin:6px 0 10px;
+    color:var(--text);
+    font-size:.88rem;
+    line-height:1.5;
 }
 
 .reasoning-trace{

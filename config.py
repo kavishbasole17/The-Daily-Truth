@@ -117,6 +117,31 @@ class Settings(BaseSettings):
     SEARCH_PROVIDER: str = "newsapi"          # "newsapi" | "wikipedia" | "tavily" | "serpapi"
 
     # ------------------------------------------------------------------
+    # Region-aware verification
+    # ------------------------------------------------------------------
+    # When a claim names a place, the pipeline resolves it as precisely as it
+    # can and *adds* regional news to the evidence it already gathers. Nothing
+    # it would have retrieved is removed, no model or fusion feature changes,
+    # and claims without a place run exactly as before. REGION_AWARE=false
+    # turns the whole feature off.
+    REGION_AWARE: bool = True
+    # nominatim — OpenStreetMap geocoder (free, no key, 1 request/second)
+    # offline   — built-in gazetteer only (countries, Indian states, major cities)
+    # off       — no location detection
+    GEOCODER_BACKEND: str = "nominatim"
+    GEOCODER_USER_AGENT: str = "PaperTrail-FakeNewsDetector/2.0 (capstone project)"
+    GEOCODER_CACHE_DIR: str = "cache/geo"
+    LOCATION_MIN_CONFIDENCE: float = 0.5   # below this a place is not trusted
+    # gnews_rss — Google News RSS, no key, country/language editions
+    # newsdata  — newsdata.io (free tier key in NEWSDATA_API_KEY)
+    # none      — no regional news search
+    REGIONAL_NEWS_PROVIDER: str = "gnews_rss"
+    NEWSDATA_API_KEY: Optional[str] = None
+    REGION_MAX_QUERIES: int = 3            # scopes tried per claim, most specific first
+    REGION_MIN_SNIPPETS: int = 2           # widen the scope until this many are found
+    REGION_MAX_EXTRA_SNIPPETS: int = 2     # regional snippets allowed on top of the usual cap
+
+    # ------------------------------------------------------------------
     # JWT / auth
     # ------------------------------------------------------------------
     JWT_SECRET_KEY: str = "dev-secret-key-CHANGE-IN-PRODUCTION"

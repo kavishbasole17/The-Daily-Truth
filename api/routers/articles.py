@@ -62,6 +62,11 @@ class ArticleSubmitRequest(BaseModel):
         description="Raw article text",
     )
     url:  Optional[str] = Field(None, max_length=2048, description="Source URL (stored for reference)")
+    region: Optional[str] = Field(
+        None, max_length=120,
+        description="Optional place the article is about (e.g. 'Pune' or 'Kerala'). "
+                    "Used as context when the text does not name its location.",
+    )
 
     @model_validator(mode="after")
     def _require_text_or_url(self):
@@ -71,6 +76,27 @@ class ArticleSubmitRequest(BaseModel):
             # Future: fetch text from URL — for now require text
             raise ValueError("URL-only submission not yet supported. Please include 'text'.")
         return self
+
+
+class LocationOut(BaseModel):
+    """Where a claim is about, resolved as precisely as the text allows."""
+    name:         Optional[str] = None
+    label:        Optional[str] = None      # "Koregaon Park, Pune, Maharashtra, India"
+    level:        Optional[str] = None      # site | street | locality | city | district | state | country
+    lat:          Optional[float] = None
+    lon:          Optional[float] = None
+    country:      Optional[str] = None
+    country_code: Optional[str] = None
+    state:        Optional[str] = None
+    district:     Optional[str] = None
+    city:         Optional[str] = None
+    locality:     Optional[str] = None
+    confidence:   float = 0.0
+    method:       Optional[str] = None      # nominatim | gazetteer | user
+    source:       Optional[str] = None      # claim | article | user
+    mentions:     list[str] = []
+    ambiguous:    bool = False
+    also:         list[dict] = []           # other places named in the same claim
 
 
 class ClaimVerdictOut(BaseModel):
@@ -88,6 +114,13 @@ class ClaimVerdictOut(BaseModel):
     numeric_conflict:  float = 0.0
     sources:           list[str] = []
     status:            str = "ok"
+
+    # Region-aware verification. All optional: absent for claims with no place,
+    # and for verdict rows stored before this existed.
+    location:          Optional[LocationOut] = None
+    search_scope:      Optional[str] = None    # narrowest region that returned evidence
+    regional_evidence: int = 0                 # evidence snippets from the claim's region
+    in_region:         list[bool] = []         # parallel to evidence_snippets
 
 
 class DegradationOut(BaseModel):
@@ -157,7 +190,8 @@ def _build_article_out(article: Article) -> ArticleOut:
     )
 
 
-def _run_pipeline_job(article_id: int, text: str, url: Optional[str]) -> None:
+def _run_pipeline_job(article_id: int, text: str, url: Optional[str],
+                      region: Optional[str] = None) -> None:
     """
     Background worker: run the pipeline and persist the result.
 
@@ -180,7 +214,7 @@ def _run_pipeline_job(article_id: int, text: str, url: Optional[str]) -> None:
         article.stage = "verifying"
         db.commit()
 
-        vr = run_verification_pipeline(text, url)
+        vr = run_verification_pipeline(text, url, region)
 
         verdict = Verdict(
             article_id=article_id,
@@ -216,7 +250,8 @@ def _run_pipeline_job(article_id: int, text: str, url: Optional[str]) -> None:
         db.close()
 
 
-def _run_pipeline_image_job(article_id: int, image_path: str, url: Optional[str]) -> None:
+def _run_pipeline_image_job(article_id: int, image_path: str, url: Optional[str],
+                            region: Optional[str] = None) -> None:
     """
     Background worker for an image submission: OCR the image, run the same
     evidence-grounded pipeline used for text, persist the result, and clean up
@@ -236,7 +271,7 @@ def _run_pipeline_image_job(article_id: int, image_path: str, url: Optional[str]
         article.stage = "verifying"
         db.commit()
 
-        vr = run_verification_pipeline_image(image_path, url)
+        vr = run_verification_pipeline_image(image_path, url, region)
 
         # The article had no text at submission time — this is the first
         # point the OCR (and, if applicable, translated) transcription is
@@ -311,7 +346,11 @@ def submit_article(
 
     The pipeline:
       1. Extracts check-worthy factual claims from the article
-      2. Retrieves evidence for each claim from trusted sources
+      1b. Locates each claim: the place it is about, resolved as precisely as the
+          text supports (see `claim_verdicts[].location`)
+      2. Retrieves evidence for each claim from trusted sources — and, for a
+         located claim, regional news from its area, widening from street to
+         city to state to country until there is enough
       3. Classifies each (evidence, claim) pair with an NLI model
       4. Scores the article with the stacking ensemble
       5. Fuses both signals into a calibrated verdict, abstaining when the
@@ -328,7 +367,7 @@ def submit_article(
     db.refresh(article)
     log.info("submit_article: article_id=%d queued", article.id)
 
-    background.add_task(_run_pipeline_job, article.id, req.text, req.url)
+    background.add_task(_run_pipeline_job, article.id, req.text, req.url, req.region)
 
     return _build_article_out(article)
 
@@ -343,6 +382,7 @@ async def submit_article_image(
     background: BackgroundTasks,
     file: UploadFile = File(..., description="Photo or screenshot of the article"),
     url: Optional[str] = Form(None, max_length=2048),
+    region: Optional[str] = Form(None, max_length=120),
     db: Session = Depends(get_db),
     _user: dict = Depends(get_current_user),
 ) -> ArticleOut:
@@ -398,7 +438,7 @@ async def submit_article_image(
     log.info("submit_article_image: article_id=%d queued (%d bytes, %s)",
               article.id, len(data), content_type)
 
-    background.add_task(_run_pipeline_image_job, article.id, image_path, url)
+    background.add_task(_run_pipeline_image_job, article.id, image_path, url, region)
 
     return _build_article_out(article)
 

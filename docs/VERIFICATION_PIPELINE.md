@@ -16,8 +16,12 @@ article text
 └─────────┬───────────┘  → up to 8 self-contained factual claims
           ▼
 ┌─────────────────────┐
+│ 1b. locate          │  which place is each claim about, and how precisely?
+└─────────┬───────────┘  → gazetteer + OpenStreetMap geocoder, with a confidence
+          ▼
+┌─────────────────────┐
 │ 2. retrieve_evidence│  entity-anchored queries → NewsAPI + Wikipedia
-└─────────┬───────────┘  → snippets gated by semantic relevance, cached
+└─────────┬───────────┘  + regional news for located claims; relevance-gated, cached
           ▼
 ┌─────────────────────┐
 │ 3. verify_claims    │  DeBERTa-v3 NLI over (evidence sentence, claim) pairs
@@ -29,7 +33,7 @@ article text
           ▼
 ┌─────────────────────┐
 │ 5. adjudicate       │  calibrated fusion → likely_real / likely_fake /
-└─────────┬───────────┘                       uncertain (+ human review)
+└─────────┬───────────┘                       uncertain
           ▼
       VerdictResult
 ```
@@ -56,7 +60,7 @@ What the pipeline does instead:
 |---|---|
 | **Honest measurement** | Evaluated only on the partition the frozen models never trained on, plus a hand-written novel set. |
 | **Calibrated confidence** | A reported 0.9 is meant to be right ~90% of the time. Measured as Expected Calibration Error, not asserted. |
-| **Principled abstention** | Thresholds chosen to hold a target precision on committed verdicts; everything else returns `uncertain` and goes to the review queue. Coverage is reported alongside precision — one without the other is meaningless. |
+| **Principled abstention** | Thresholds chosen to hold a target precision on committed verdicts; everything else returns `uncertain`, with the reason attached. Coverage is reported alongside precision — one without the other is meaningless. |
 | **No silent failure** | Every fallback, timeout, rate limit and missing model is recorded and surfaced. |
 | **Determinism** | Same article → same verdict. Retrieval is cached, models are seeded and in eval mode. |
 
@@ -91,6 +95,79 @@ Backends: `heuristic` (default, local, deterministic), `llm` (optional, off,
 with a hallucination guard requiring each returned claim to be grounded in an
 actual article sentence), `naive` (the old splitter, kept only so a regression
 test can prove the bug stays fixed).
+
+## Stage 1b — Locating claims (region-aware)
+
+`paper_trail_core/agents/locator.py`, `nlp/gazetteer.py`, `nlp/geocoder.py`.
+
+Many claims are about somewhere in particular, and the best evidence for them is
+local: a street flooding in Pune is reported by Pune's newsrooms, not by a wire
+service's world desk. This stage finds the place so that retrieval can look
+there.
+
+**What it produces** — per claim, a `location` (or none):
+
+| field | meaning |
+|---|---|
+| `level` | how precisely the place was resolved: `site` · `street` · `locality` · `city` · `district` · `state` · `country` |
+| `name`, `label` | e.g. `Koregaon Park` / `Koregaon Park, Pune, Maharashtra, India` |
+| `lat`, `lon`, `country_code`, `state`, `district`, `city`, `locality` | the resolved place and its hierarchy |
+| `confidence` | 0–1; places below `LOCATION_MIN_CONFIDENCE` (0.5) are dropped |
+| `source` | `claim` (named in the claim), `article` (inherited from a dateline or a place the article is clearly about), or `user` (the `region` the caller supplied) |
+
+**How it decides.**
+
+1. **Candidates need a reason.** A capitalised phrase is only considered a
+   place if it is in the built-in gazetteer, follows a place cue ("in", "near",
+   "residents of"), is the article's dateline, or is followed by a place noun
+   ("Pune district"). People, organisations and acronyms are not sent to the
+   geocoder.
+2. **Resolution uses the whole article.** Candidates are looked up in the
+   gazetteer (countries, Indian states, major cities) and in OpenStreetMap
+   Nominatim, and scored on name match, prominence, agreement with the countries
+   and states the *text* mentions, and the cue. That is what separates
+   "Aurangabad, Bihar" from "Aurangabad, Maharashtra".
+3. **It refuses to guess.** A name that could be several places and is not
+   settled by context ("Springfield") is reported as not located, and the claim
+   does *not* fall back to the article's place. A building-level match is only
+   trusted when the name is a place type (university, hospital, dam ...), so a
+   company is never pinned to its head office.
+4. **Claims with no place of their own** inherit the article's place only when
+   the article is demonstrably about it (a dateline, a place mentioned more than
+   once, or the user's `region`), at a discounted confidence.
+
+**What it does not do.** It does not change any verdict or fusion feature. It
+only decides where evidence is searched.
+
+**Cost and failure.** Nominatim is free but limited to one request per second,
+so every lookup is cached on disk (`cache/geo`) and at most 8 places are
+resolved per article within a 40 s budget. If the geocoder is unreachable the
+stage falls back to the gazetteer and records a `geocoder_unavailable`
+degradation; if the stage itself fails, claims are simply treated as having no
+location.
+
+### Regional retrieval
+
+For a located claim, `evidence_retriever.regional_evidence` adds regional news
+**after** the normal global search. The global results are untouched and stay
+first; regional ones go through the same relevance gate and are appended, up to
+`REGION_MAX_EXTRA_SNIPPETS` beyond the usual cap.
+
+The search starts at the most specific scope and **widens** only if it finds too
+little: *locality → city → state → country*, stopping once
+`REGION_MIN_SNIPPETS` relevant snippets are found and trying at most
+`REGION_MAX_QUERIES` scopes. The verdict reports `search_scope` (the narrowest
+scope that returned evidence), `regional_evidence` (how many snippets are from
+the region) and a per-snippet `in_region` flag, and a `region_widened` or
+`no_regional_coverage` degradation (severity `info`) when applicable.
+
+Regional news comes from Google News RSS country editions (no key needed) or,
+optionally, newsdata.io (`REGIONAL_NEWS_PROVIDER=newsdata`, free key). Google
+asks that its RSS feeds be used for personal, non-commercial purposes; set
+`REGIONAL_NEWS_PROVIDER=newsdata` (or `none`) for anything beyond a coursework
+demo. Set `REGION_AWARE=false` to switch the whole feature off.
+
+---
 
 ## Stage 2 — Evidence retrieval
 
@@ -256,7 +333,7 @@ because they measure different things.
 **Headline:** on articles it commits to, the system is **98.3% accurate
 in-distribution** (42% coverage) and **88.2% accurate on novel hand-written
 articles** (57% coverage), with **zero false "fake" verdicts on either slice**.
-Everything else is routed to human review.
+Everything else is returned as `uncertain`.
 
 ### `golden` — 30 hand-written articles, in no training corpus
 
@@ -270,7 +347,7 @@ The honest read on novel input, and the scenario the system is actually for.
 
 **Delivered verdicts (with abstention): 88.2% accurate on the 56.7% of articles
 the system committed to**, precision 1.000 on `likely_fake` and 0.867 on
-`likely_real`. The other 43% were routed to human review.
+`likely_real`. The other 43% were returned as `uncertain`.
 
 The frozen ensemble alone gets 60% here while reporting ~95% confidence — that
 gap between its accuracy and its stated confidence (ECE 0.341) is the failure

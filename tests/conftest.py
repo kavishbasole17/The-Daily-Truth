@@ -39,6 +39,19 @@ def _isolate_fusion_singleton():
     fusion._payload, fusion._loaded = saved_payload, saved_loaded
 
 
+@pytest.fixture(autouse=True)
+def _no_live_geocoding(monkeypatch, tmp_path):
+    """
+    Keep the locator off the network: gazetteer only, and a throwaway geocode
+    cache so a developer's real cache can never make a test pass or fail.
+    Tests that exercise the geocoder patch it explicitly.
+    """
+    from config import settings
+
+    monkeypatch.setattr(settings, "GEOCODER_BACKEND", "offline")
+    monkeypatch.setattr(settings, "GEOCODER_CACHE_DIR", str(tmp_path / "geo"))
+
+
 @pytest.fixture
 def offline_settings(monkeypatch):
     """Force every stage onto a backend that needs no network and no model."""

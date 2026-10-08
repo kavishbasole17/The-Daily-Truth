@@ -583,10 +583,265 @@ def _mock_snippets(_claim: str, idx: int) -> list[dict[str, Any]]:
     } for i in range(2)]
 
 
+# ── Regional search ───────────────────────────────────────────────────────────
+#
+# Everything below is *additive*. The global queries above run exactly as they
+# did before; when a claim has a location, regional results are gated by the
+# same relevance floor and appended after them. Nothing the pipeline used to
+# retrieve is displaced, and claims without a location never reach this code.
+
+_GNEWS_MIN_INTERVAL = 1.0
+_gnews_lock = threading.Lock()
+_gnews_last_call = 0.0
+
+
+def _cfg(name: str, default: Any) -> Any:
+    return getattr(settings, name, default) if "settings" in globals() else default
+
+
+def regional_provider() -> str | None:
+    """The configured regional news provider, or None if regional search is off."""
+    if not _cfg("REGION_AWARE", True) or _BACKEND == "mock":
+        return None
+    choice = (_cfg("REGIONAL_NEWS_PROVIDER", "gnews_rss") or "").lower()
+    if choice in ("", "none", "off"):
+        return None
+    if choice == "newsdata" and _cfg("NEWSDATA_API_KEY", None):
+        return "newsdata"
+    return "gnews_rss"
+
+
+def _strip_tags(s: str) -> str:
+    import html
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", s or "")).split())
+
+
+def _search_gnews_rss(query: str, country_code: str) -> list[dict[str, Any]]:
+    """
+    Google News RSS, scoped to a country edition.
+
+    Keyless, and the only free source here that is genuinely regional: the
+    `gl`/`ceid` parameters pick the country edition, so local outlets surface
+    for local queries. Results are headlines only, which is the same grain
+    NewsAPI's title+description gives the verifier.
+    """
+    import requests
+    import xml.etree.ElementTree as ET
+
+    global _gnews_last_call
+    with _gnews_lock:
+        wait = _GNEWS_MIN_INTERVAL - (time.time() - _gnews_last_call)
+        if wait > 0:
+            time.sleep(wait)
+        _gnews_last_call = time.time()
+
+    cc = (country_code or "us").upper()
+    resp = requests.get(
+        "https://news.google.com/rss/search",
+        params={"q": query, "hl": f"en-{cc}", "gl": cc, "ceid": f"{cc}:en"},
+        headers={"User-Agent": "Mozilla/5.0 (compatible; PaperTrail-FakeNewsDetector/2.0)"},
+        timeout=HTTP_TIMEOUT,
+    )
+    if resp.status_code == 429:
+        raise RuntimeError("gnews_rate_limited")
+    resp.raise_for_status()
+    body = resp.content
+    if b"<!DOCTYPE" in body or b"<!ENTITY" in body:       # never expand entities
+        raise RuntimeError("gnews: unexpected DTD in feed")
+    root = ET.fromstring(body)
+
+    out = []
+    for item in root.iter("item"):
+        title = _strip_tags(item.findtext("title") or "")
+        src = item.find("source")
+        src_name = (src.text or "").strip() if src is not None else ""
+        src_url = src.get("url", "") if src is not None else ""
+        if src_name and title.endswith(f" - {src_name}"):
+            title = title[: -len(src_name) - 3].strip()
+        if not title:
+            continue
+        desc = _strip_tags(item.findtext("description") or "")
+        text = title if (not desc or desc.startswith(title) or title in desc) else f"{title}. {desc}"
+        domain = domain_of(src_url) or domain_of(src_name)
+        out.append({
+            "text": text.rstrip(".") + ".",
+            "url": item.findtext("link") or "",
+            "domain": domain,
+            "trust": trust_for(domain or src_name),
+            "provider": "gnews_rss",
+            "published_at": item.findtext("pubDate") or "",
+        })
+        if len(out) >= 8:
+            break
+    return out
+
+
+def _search_newsdata(query: str, country_code: str) -> list[dict[str, Any]]:
+    import requests
+
+    params = {"apikey": settings.NEWSDATA_API_KEY, "q": query[:100], "language": "en"}
+    if country_code:
+        params["country"] = country_code.lower()
+    resp = requests.get("https://newsdata.io/api/1/latest", params=params, timeout=HTTP_TIMEOUT)
+    if resp.status_code == 429:
+        raise RuntimeError("newsdata_rate_limited")
+    resp.raise_for_status()
+    out = []
+    for r in (resp.json().get("results") or [])[:8]:
+        title = (r.get("title") or "").strip()
+        desc = (r.get("description") or "").strip()
+        if not (title or desc):
+            continue
+        link = r.get("link") or ""
+        domain = domain_of(link) or domain_of(r.get("source_url") or "") or domain_of(r.get("source_id") or "")
+        out.append({
+            "text": f"{title}. {desc}".strip(),
+            "url": link, "domain": domain, "trust": trust_for(domain),
+            "provider": "newsdata", "published_at": r.get("pubDate") or "",
+        })
+    return out
+
+
+_REGIONAL_MAP = {"gnews_rss": _search_gnews_rss, "newsdata": _search_newsdata}
+
+
+def _search_regional_cached(provider: str, query: str, country_code: str) -> tuple[list[dict[str, Any]], str]:
+    """One regional query through the shared evidence cache. Returns (results, status)."""
+    cache_provider = f"{provider}:{(country_code or 'xx').lower()}"
+    cached = evidence_cache.get(cache_provider, query)
+    if cached is not None:
+        return cached, "ok"
+    if _BACKEND == "cache_only":
+        return [], "ok"
+
+    fn = _REGIONAL_MAP[provider]
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            results = fn(query, country_code)
+            evidence_cache.put(cache_provider, query, results)
+            return results, "ok"
+        except RuntimeError as exc:
+            if "rate_limited" in str(exc):
+                return [], "rate_limited"
+            last_exc = exc
+        except Exception as exc:
+            last_exc = exc
+        if attempt == 0:
+            time.sleep(0.5)
+    log.warning("evidence_retriever: regional %s query failed (%s): %r",
+                provider, last_exc, query[:60])
+    return [], "error"
+
+
+def _place_terms(location: dict[str, Any]) -> list[str]:
+    """Distinct lowercase names a snippet might use for the claim's place."""
+    terms = []
+    for k in ("name", "locality", "city", "district", "state"):
+        v = (location.get(k) or "").strip().lower()
+        if len(v) >= 3 and v not in terms:
+            terms.append(v)
+    return terms
+
+
+def _is_in_region(snippet: dict[str, Any], location: dict[str, Any]) -> bool:
+    """Whether a snippet is about, or published in, the claim's region."""
+    text = (snippet.get("text") or "").lower()
+    for term in _place_terms(location):
+        if re.search(rf"(?<![a-z]){re.escape(term)}(?![a-z])", text):
+            return True
+    cc = (location.get("country_code") or "").lower()
+    domain = (snippet.get("domain") or "").lower()
+    # ccTLD match only: ".com" says nothing about where an outlet is.
+    if not cc:
+        return False
+    return domain.endswith(f".{cc}") or (cc == "gb" and domain.endswith((".uk", ".co.uk")))
+
+
+def _scope_label(scope: dict[str, str]) -> str:
+    return f"{scope['term']} ({scope['level']})"
+
+
+def regional_evidence(claim: str, location: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """
+    Regional snippets for a located claim, widening the scope until there is enough.
+
+    Starts at the most specific place the locator resolved and moves outward
+    (locality -> city -> state -> country), stopping as soon as
+    REGION_MIN_SNIPPETS relevant snippets are in hand. What was searched, and
+    whether it had to widen, is returned so the verdict can say so.
+    """
+    from paper_trail_core.agents.locator import scopes_for
+
+    info: dict[str, Any] = {"provider": None, "scopes_tried": [], "scope_used": None,
+                            "widened": False, "status": "disabled", "regional_snippets": 0}
+    provider = regional_provider()
+    if provider is None:
+        return [], info
+    info["provider"] = provider
+    info["status"] = "no_hits"
+
+    scopes = scopes_for(location)[: max(1, int(_cfg("REGION_MAX_QUERIES", 3)))]
+    if not scopes:
+        return [], info
+
+    # Strip the place itself from the claim so the keywords describe the *event*.
+    stripped = claim
+    for term in _place_terms(location):
+        stripped = re.sub(rf"(?i)(?<![a-z]){re.escape(term)}(?![a-z])", " ", stripped)
+    keywords = _keywords(stripped)[:4]
+    if not keywords:
+        return [], info
+
+    wanted = max(1, int(_cfg("REGION_MIN_SNIPPETS", 2)))
+    collected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    statuses: list[str] = []
+
+    for i, scope in enumerate(scopes):
+        query = f"{scope['term']} {' '.join(keywords)}"
+        results, status = _search_regional_cached(provider, query, scope.get("country_code", ""))
+        statuses.append(status)
+        info["scopes_tried"].append(_scope_label(scope))
+
+        fresh = []
+        for r in results:
+            key = r.get("url") or r.get("text", "")[:120]
+            if key in seen:
+                continue
+            seen.add(key)
+            fresh.append(r)
+        gated = gate_by_relevance(claim, fresh)
+        for g in gated:
+            g["in_region"] = _is_in_region(g, location) or scope["level"] != "country"
+            g["region_scope"] = scope["level"]
+        if gated:
+            collected.extend(gated)
+            info["scope_used"] = _scope_label(scope)
+        if len(collected) >= wanted:
+            break
+
+    if collected:
+        info["status"] = "ok"
+        info["widened"] = info["scope_used"] != info["scopes_tried"][0]
+    elif statuses and all(s == "error" for s in statuses):
+        info["status"] = "error"
+    elif "rate_limited" in statuses:
+        info["status"] = "rate_limited"
+
+    collected.sort(key=lambda c: (-c["trust"] * c["relevance"], -c["relevance"], c.get("url", "")))
+    return collected, info
+
+
 # ── Per-claim retrieval ───────────────────────────────────────────────────────
 
-def retrieve_for_claim(claim: str, idx: int) -> dict[str, Any]:
-    """Fetch, gate and package the evidence for a single claim."""
+def retrieve_for_claim(claim: str, idx: int, location: dict[str, Any] | None = None) -> dict[str, Any]:
+    """
+    Fetch, gate and package the evidence for a single claim.
+
+    `location` (from the locator) adds regional search on top of the usual
+    global queries; without it the behaviour is exactly what it always was.
+    """
     if _BACKEND == "mock":
         return {"claim": claim, "snippets": _mock_snippets(claim, idx), "status": "ok",
                 "cache_hits": 0, "queries": 0}
@@ -627,8 +882,24 @@ def retrieve_for_claim(claim: str, idx: int) -> dict[str, Any]:
     else:
         status = "no_hits"
 
-    return {"claim": claim, "snippets": snippets, "status": status,
-            "cache_hits": cache_hits, "queries": len(queries)}
+    out = {"claim": claim, "snippets": snippets, "status": status,
+           "cache_hits": cache_hits, "queries": len(queries)}
+
+    if location:
+        base_urls = {s.get("url") for s in snippets if s.get("url")}
+        regional, region = regional_evidence(claim, location)
+        extra = [s for s in regional if not s.get("url") or s["url"] not in base_urls]
+        room = max(0, MAX_SNIPPETS_PER_CLAIM - len(snippets))
+        take = extra[: room + max(0, int(_cfg("REGION_MAX_EXTRA_SNIPPETS", 2)))]
+        for s in snippets:
+            s.setdefault("in_region", _is_in_region(s, location))
+        out["snippets"] = snippets + take
+        region["regional_snippets"] = len(take)
+        if take and out["status"] != "ok":
+            out["status"] = "ok"
+        out["location"] = location
+        out["region"] = region
+    return out
 
 
 # ── Node ──────────────────────────────────────────────────────────────────────
@@ -657,12 +928,24 @@ def retrieve_evidence_node(state: PipelineState) -> dict:
     # Network-bound, so threads help and the GIL is released during requests.
     # Results are reassembled by index, never by completion order — otherwise
     # the same article could produce differently-ordered evidence run to run.
-    with ThreadPoolExecutor(max_workers=max(1, _WORKERS)) as pool:
-        evidence = list(pool.map(lambda p: retrieve_for_claim(p[1], p[0]), list(enumerate(budget))))
+    locations = state.get("claim_locations") or []
 
-    for claim in claims[_MAX_CALLS:]:
-        evidence.append({"claim": claim, "snippets": [], "status": "skipped",
-                         "cache_hits": 0, "queries": 0})
+    def _fetch(p):
+        idx, claim = p
+        loc = locations[idx] if idx < len(locations) else None
+        # Called without `location` when there is none, so claims the locator
+        # found nothing for take the original two-argument path untouched.
+        return retrieve_for_claim(claim, idx, location=loc) if loc else retrieve_for_claim(claim, idx)
+
+    with ThreadPoolExecutor(max_workers=max(1, _WORKERS)) as pool:
+        evidence = list(pool.map(_fetch, list(enumerate(budget))))
+
+    for i, claim in enumerate(claims[_MAX_CALLS:], start=_MAX_CALLS):
+        skipped = {"claim": claim, "snippets": [], "status": "skipped",
+                   "cache_hits": 0, "queries": 0}
+        if i < len(locations) and locations[i]:
+            skipped["location"] = locations[i]
+        evidence.append(skipped)
 
     n_ok = sum(1 for e in evidence if e["status"] == "ok")
     n_rate_limited = sum(1 for e in evidence if e["status"] == "rate_limited")
@@ -672,6 +955,7 @@ def retrieve_evidence_node(state: PipelineState) -> dict:
     relevances = [s["relevance"] for e in evidence for s in e["snippets"]]
     trusts = [s["trust"] for e in evidence for s in e["snippets"]]
 
+    regions = [e["region"] for e in evidence if e.get("region")]
     stats = {
         "n_claims": len(evidence),
         "n_with_evidence": n_ok,
@@ -683,6 +967,8 @@ def retrieve_evidence_node(state: PipelineState) -> dict:
         "mean_trust": round(sum(trusts) / len(trusts), 4) if trusts else 0.0,
         "cache_hit_rate": round(total_hits / max(1, total_queries), 4),
         "wall_s": round(time.time() - started, 3),
+        "n_located": sum(1 for e in evidence if e.get("location")),
+        "n_regional_snippets": sum(r.get("regional_snippets", 0) for r in regions),
     }
 
     if n_rate_limited:
@@ -709,6 +995,27 @@ def retrieve_evidence_node(state: PipelineState) -> dict:
         degradations += degrade(
             "evidence_retriever", "search_error",
             f"Search failed for {n_error} claim(s) after retrying.",
+        )
+    widened = [e for e in evidence if e.get("region", {}).get("widened")]
+    if widened:
+        first = widened[0]["region"]
+        degradations += degrade(
+            "evidence_retriever", "region_widened",
+            f"For {len(widened)} claim(s) there was not enough local coverage at the "
+            f"most specific place, so the search widened (e.g. {first['scopes_tried'][0]} "
+            f"-> {first['scope_used']}).",
+            severity="info",
+        )
+    uncovered = [e for e in evidence
+                 if e.get("region") and e["region"].get("provider")
+                 and e["region"].get("regional_snippets", 0) == 0]
+    if uncovered:
+        place = uncovered[0]["location"].get("label") or uncovered[0]["location"].get("name")
+        degradations += degrade(
+            "evidence_retriever", "no_regional_coverage",
+            f"No relevant regional news was found for {len(uncovered)} located claim(s) "
+            f"(e.g. {place}); they were checked against the usual global sources only.",
+            severity="info",
         )
     if n_ok == 0:
         degradations += degrade(

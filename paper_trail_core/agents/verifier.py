@@ -242,6 +242,7 @@ def aggregate_claim(
         numeric_conflict=round(max_numeric, 4),
         sources=[s.get("domain", "") for s in snippets],
         status=status,
+        in_region=[bool(s.get("in_region")) for s in snippets],
     )
 
 
@@ -381,14 +382,24 @@ def verify_claims_node(state: PipelineState) -> dict:
         snippets = item.get("snippets", []) if status == "ok" else []
         ordered = [best.get((ci, si)) for si in range(len(snippets))]
         pairs = [(s, r) for s, r in zip(snippets, ordered) if r is not None]
-        claim_verdicts.append(
-            aggregate_claim(
-                claim,
-                [s for s, _ in pairs],
-                [r for _, r in pairs],
-                status=status if pairs or status != "ok" else "no_relevant",
-            )
+        cv = aggregate_claim(
+            claim,
+            [s for s, _ in pairs],
+            [r for _, r in pairs],
+            status=status if pairs or status != "ok" else "no_relevant",
         )
+        # Region metadata is reported alongside the verdict; it plays no part in
+        # computing it, so verdicts and fusion features are identical with or
+        # without it.
+        location = item.get("location")
+        if location:
+            region = item.get("region") or {}
+            cv["location"] = location
+            cv["search_scope"] = region.get("scope_used") or (
+                (region.get("scopes_tried") or [None])[-1]
+            )
+            cv["regional_evidence"] = sum(1 for flag in cv.get("in_region", []) if flag)
+        claim_verdicts.append(cv)
 
     counts = {v: sum(1 for c in claim_verdicts if c["verdict"] == v)
               for v in ("entailment", "contradiction", "neutral", "unverifiable")}

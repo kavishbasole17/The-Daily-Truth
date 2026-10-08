@@ -9,7 +9,9 @@ Graph:
                             ↓
                        extract_claims   ← segment + rank check-worthy claims
                             ↓
-                       retrieve_evidence ← entity queries, relevance-gated, cached
+                       locate           ← where is each claim about? (place + precision)
+                            ↓
+                       retrieve_evidence ← entity queries + regional news, relevance-gated, cached
                             ↓
                        verify_claims    ← NLI per (evidence sentence, claim) pair
                             ↓
@@ -34,8 +36,8 @@ vector it was never fit on, which is a different failure mode than "a short
 real article had nothing checkable."
 
 Public API:
-    run_verification_pipeline(article_text, url) -> VerdictResult
-    run_verification_pipeline_image(image_path, url) -> VerdictResult
+    run_verification_pipeline(article_text, url, region_hint) -> VerdictResult
+    run_verification_pipeline_image(image_path, url, region_hint) -> VerdictResult
 """
 from __future__ import annotations
 
@@ -62,6 +64,7 @@ except ImportError:  # pragma: no cover
 from paper_trail_core.agents.adjudicator import adjudicate_node
 from paper_trail_core.agents.claim_extractor import extract_claims_node
 from paper_trail_core.agents.evidence_retriever import retrieve_evidence_node
+from paper_trail_core.agents.locator import locate_node
 from paper_trail_core.agents.ocr_agent import ocr_node
 from paper_trail_core.agents.state import ClaimVerdict, PipelineState
 from paper_trail_core.agents.stylistic_ensemble_agent import run_ensemble_node
@@ -132,6 +135,10 @@ def _abstain_node(state: PipelineState) -> dict:
 
 def _fallback_claims(_state: PipelineState) -> dict:
     return {"claims": []}
+
+
+def _fallback_locate(state: PipelineState) -> dict:
+    return {"claim_locations": [None] * len(state.get("claims", [])), "article_location": None}
 
 
 def _fallback_evidence(state: PipelineState) -> dict:
@@ -242,6 +249,8 @@ def _build_graph() -> StateGraph:
     g.add_node("abstain", _abstain_node)
     g.add_node("extract_claims",
                with_stage_guard(extract_claims_node, "claim_extractor", _fallback_claims))
+    g.add_node("locate",
+               with_stage_guard(locate_node, "locator", _fallback_locate))
     g.add_node("retrieve_evidence",
                with_stage_guard(retrieve_evidence_node, "evidence_retriever", _fallback_evidence))
     g.add_node("verify_claims",
@@ -261,7 +270,8 @@ def _build_graph() -> StateGraph:
         "translate", _route_after_translation, {"proceed": "extract_claims", "abstain": "abstain"}
     )
     g.add_edge("abstain",           END)
-    g.add_edge("extract_claims",    "retrieve_evidence")
+    g.add_edge("extract_claims",    "locate")
+    g.add_edge("locate",            "retrieve_evidence")
     g.add_edge("retrieve_evidence", "verify_claims")
     g.add_edge("verify_claims",     "run_ensemble")
     g.add_edge("run_ensemble",      "adjudicate")
@@ -332,7 +342,7 @@ def _guarded_result(verdict: str, trace: str, degradations: list[Degradation]) -
     )
 
 
-def _base_state(url: Optional[str]) -> dict:
+def _base_state(url: Optional[str], region_hint: Optional[str] = None) -> dict:
     """Fields common to every entry path, before input-type-specific ones are set."""
     return {
         "url":               url,
@@ -346,7 +356,10 @@ def _base_state(url: Optional[str]) -> dict:
         "original_text":     None,
         "translated_text":   None,
         "translation_confidence": None,
+        "region_hint":       region_hint,
         "claims":            [],
+        "claim_locations":   [],
+        "article_location":  None,
         "evidence":          [],
         "retrieval_stats":   {},
         "claim_verdicts":    [],
@@ -402,6 +415,7 @@ def _run_graph(initial_state: PipelineState) -> VerdictResult:
 def run_verification_pipeline(
     article_text: str,
     url: Optional[str] = None,
+    region_hint: Optional[str] = None,
 ) -> VerdictResult:
     """
     Run the full multi-agent verification pipeline over plain text.
@@ -426,13 +440,14 @@ def run_verification_pipeline(
         log.warning("pipeline: truncating %d chars to %d", len(text), MAX_ARTICLE_CHARS)
         text = text[:MAX_ARTICLE_CHARS]
 
-    initial_state: PipelineState = {**_base_state(url), "article_text": text}
+    initial_state: PipelineState = {**_base_state(url, region_hint), "article_text": text}
     return _run_graph(initial_state)
 
 
 def run_verification_pipeline_image(
     image_path: str,
     url: Optional[str] = None,
+    region_hint: Optional[str] = None,
 ) -> VerdictResult:
     """
     Run the full multi-agent verification pipeline over an image.
@@ -453,7 +468,7 @@ def run_verification_pipeline_image(
         )
 
     initial_state: PipelineState = {
-        **_base_state(url),
+        **_base_state(url, region_hint),
         "article_text":   "",
         "input_type":     "image",
         "raw_image_ref":  image_path,

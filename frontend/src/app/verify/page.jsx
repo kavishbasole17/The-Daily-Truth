@@ -31,7 +31,7 @@ function formatTime(ts) {
 const VERDICT_META = {
     likely_real: { label: "LIKELY REAL", className: "real-card" },
     likely_fake: { label: "LIKELY MISINFORMATION", className: "fake-card" },
-    uncertain: { label: "UNCERTAIN — NEEDS HUMAN REVIEW", className: "uncertain-card" },
+    uncertain: { label: "UNCERTAIN", className: "uncertain-card" },
 };
 
 const CLAIM_VERDICT_META = {
@@ -138,9 +138,6 @@ function AssistantResult({ result, extractedText }) {
                 <div>
                     <h2>{meta.label}</h2>
                     <p>{Math.round(verdict.confidence * 100)}% confidence</p>
-                    {verdict.needs_human_review && (
-                        <p className="review-flag">Flagged for analyst review — added to the review queue.</p>
-                    )}
                 </div>
             </div>
 
@@ -182,12 +179,31 @@ function AssistantResult({ result, extractedText }) {
                                             </span>
                                         </div>
                                         <p className="claim-text">&ldquo;{cv.claim}&rdquo;</p>
+                                        {cv.location && (
+                                            <p className="claim-location">
+                                                <span className="evidence-source">
+                                                    {cv.location.level || "place"}
+                                                </span>
+                                                {cv.location.label || cv.location.name}
+                                                {cv.search_scope && (
+                                                    <span className="muted">
+                                                        {" "}· searched {cv.search_scope}
+                                                        {cv.regional_evidence > 0
+                                                            ? ` · ${cv.regional_evidence} local source${cv.regional_evidence === 1 ? "" : "s"}`
+                                                            : " · no local sources found"}
+                                                    </span>
+                                                )}
+                                            </p>
+                                        )}
                                         {cv.evidence_snippets.length > 0 && (
                                             <ul className="evidence-list">
                                                 {cv.evidence_snippets.map((s, j) => (
                                                     <li key={j}>
                                                         {cv.sources?.[j] && (
                                                             <span className="evidence-source">{cv.sources[j]}</span>
+                                                        )}
+                                                        {cv.in_region?.[j] && (
+                                                            <span className="evidence-source evidence-local">local</span>
                                                         )}
                                                         {s}
                                                     </li>

@@ -189,3 +189,97 @@ def test_result_is_json_serialisable(monkeypatch):
     json.loads(vr.claim_verdicts_json())
     json.loads(vr.degradations_json())
     json.dumps(vr.to_dict())
+
+
+# ── Region-aware verification ─────────────────────────────────────────────────
+
+LOCAL_ARTICLE = (
+    "Officials in Pune said the Khadakwasla dam released water into the Mutha river on "
+    "Monday after heavy rain. The release raised the river level by two metres near the "
+    "city, according to the irrigation department."
+)
+
+
+def stub_located_evidence(monkeypatch, text="Khadakwasla dam released water into the Mutha river."):
+    """Evidence stub with the 3-argument signature the retriever uses for located claims."""
+    seen = []
+
+    def _retrieve(claim, idx, location=None):
+        seen.append(location)
+        snippets = [{"text": text, "url": "https://thehindu.com/x", "domain": "thehindu.com",
+                     "trust": 0.9, "relevance": 0.75, "provider": "test", "in_region": bool(location)}]
+        out = {"claim": claim, "snippets": snippets, "status": "ok", "cache_hits": 1, "queries": 1}
+        if location:
+            out["location"] = location
+            out["region"] = {"provider": "gnews_rss", "scopes_tried": ["Pune Maharashtra (city)"],
+                             "scope_used": "Pune Maharashtra (city)", "widened": False,
+                             "status": "ok", "regional_snippets": 1}
+        return out
+    monkeypatch.setattr(ER, "retrieve_for_claim", _retrieve)
+    return seen
+
+
+def test_located_claims_carry_their_location_through_to_the_verdict(monkeypatch):
+    seen = stub_located_evidence(monkeypatch)
+    stub_nli(monkeypatch)
+
+    vr = P.run_verification_pipeline(LOCAL_ARTICLE)
+    assert_contract(vr)
+
+    located = [cv for cv in vr.claim_verdicts if cv.get("location")]
+    assert located, "expected at least one claim located in Pune"
+    cv = located[0]
+    assert cv["location"]["name"] == "Pune" and cv["location"]["country_code"] == "in"
+    assert cv["search_scope"] == "Pune Maharashtra (city)"
+    assert cv["regional_evidence"] == 1 and cv["in_region"] == [True]
+    assert any(loc and loc["name"] == "Pune" for loc in seen)
+
+
+def test_region_awareness_does_not_change_the_verdict(monkeypatch):
+    """Same evidence in, same verdict out: location is reported, never scored."""
+    from config import settings
+
+    stub_located_evidence(monkeypatch)
+    stub_nli(monkeypatch)
+    with_region = P.run_verification_pipeline(LOCAL_ARTICLE)
+
+    monkeypatch.setattr(settings, "REGION_AWARE", False)
+    without = P.run_verification_pipeline(LOCAL_ARTICLE)
+
+    assert with_region.verdict == without.verdict
+    assert with_region.confidence == without.confidence
+    assert with_region.fused_score == without.fused_score
+    assert with_region.fusion_features == without.fusion_features
+    assert not any(cv.get("location") for cv in without.claim_verdicts)
+
+
+def test_article_without_places_is_unaffected(monkeypatch):
+    stub_evidence(monkeypatch, "Strongly corroborating evidence from Reuters.")   # 2-arg stub
+    stub_nli(monkeypatch)
+    vr = P.run_verification_pipeline(REAL_ARTICLE)
+    assert_contract(vr)
+    assert not any(cv.get("location") for cv in vr.claim_verdicts)
+
+
+def test_locator_failure_is_contained(monkeypatch):
+    def _explode(_state):
+        raise RuntimeError("simulated locator crash")
+    monkeypatch.setattr(P, "locate_node", _explode)
+    P._app = None
+    stub_evidence(monkeypatch, "Strongly corroborating evidence from Reuters.")
+    stub_nli(monkeypatch)
+    try:
+        vr = P.run_verification_pipeline(REAL_ARTICLE)
+        assert_contract(vr)
+        assert any(d["stage"] == "locator" for d in vr.degradations)
+        assert vr.claim_verdicts, "claims must still be verified without locations"
+    finally:
+        P._app = None
+
+
+def test_region_hint_reaches_claims_that_name_no_place(monkeypatch):
+    seen = stub_located_evidence(monkeypatch)
+    stub_nli(monkeypatch)
+    vr = P.run_verification_pipeline(REAL_ARTICLE, region_hint="Kerala")
+    assert_contract(vr)
+    assert any(loc and loc["name"] == "Kerala" and loc["source"] == "user" for loc in seen)

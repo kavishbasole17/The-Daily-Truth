@@ -216,6 +216,82 @@ def test_review_queue_endpoints_are_gone(client, admin_token):
     assert resp.status_code == 404
 
 
+# ── Region-aware verification ──────────────────────────────────────────────────
+
+def test_submit_passes_the_region_to_the_pipeline(client, admin_token):
+    from paper_trail_core.agents.pipeline import VerdictResult
+
+    vr = VerdictResult(verdict="uncertain", confidence=0.0, claim_verdicts=[],
+                       ensemble_score=0.5, reasoning_trace="")
+    with patch("api.routers.articles.run_verification_pipeline", return_value=vr) as run:
+        resp = client.post(
+            "/articles/submit",
+            json={"text": SAMPLE_ARTICLE, "region": "Pune"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    assert resp.status_code == 202
+    assert run.call_args.args[2] == "Pune"
+
+
+def test_region_is_optional(client, admin_token):
+    from paper_trail_core.agents.pipeline import VerdictResult
+
+    vr = VerdictResult(verdict="uncertain", confidence=0.0, claim_verdicts=[],
+                       ensemble_score=0.5, reasoning_trace="")
+    with patch("api.routers.articles.run_verification_pipeline", return_value=vr) as run:
+        resp = client.post(
+            "/articles/submit",
+            json={"text": SAMPLE_ARTICLE},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    assert resp.status_code == 202
+    assert run.call_args.args[2] is None
+
+
+def test_claim_location_round_trips_through_storage(client, admin_token):
+    from paper_trail_core.agents.pipeline import VerdictResult
+
+    location = {
+        "name": "Pune", "label": "Pune, Pune District, Maharashtra, India", "level": "city",
+        "lat": 18.52, "lon": 73.86, "country": "India", "country_code": "in",
+        "state": "Maharashtra", "district": "Pune District", "city": "Pune", "locality": None,
+        "confidence": 0.95, "method": "nominatim", "source": "claim",
+        "mentions": ["Pune"], "ambiguous": False, "also": [],
+    }
+    claim = {
+        "claim": "The dam released water into the river near Pune.", "verdict": "entailment",
+        "confidence": 0.8, "evidence_snippets": ["Dam discharge floods Pune."],
+        "location": location, "search_scope": "Pune Maharashtra (city)",
+        "regional_evidence": 1, "in_region": [True],
+    }
+    vr = VerdictResult(verdict="likely_real", confidence=0.8, claim_verdicts=[claim],
+                       ensemble_score=0.7, reasoning_trace="trace")
+    with patch("api.routers.articles.run_verification_pipeline", return_value=vr):
+        resp = client.post("/articles/submit", json={"text": SAMPLE_ARTICLE},
+                           headers={"Authorization": f"Bearer {admin_token}"})
+    body = client.get(f"/articles/{resp.json()['id']}").json()
+
+    cv = body["verdict"]["claim_verdicts"][0]
+    assert cv["location"]["name"] == "Pune" and cv["location"]["level"] == "city"
+    assert cv["location"]["country_code"] == "in" and cv["location"]["confidence"] == 0.95
+    assert cv["search_scope"] == "Pune Maharashtra (city)"
+    assert cv["regional_evidence"] == 1 and cv["in_region"] == [True]
+
+
+def test_claims_stored_before_regions_existed_still_load(client, admin_token):
+    from paper_trail_core.agents.pipeline import VerdictResult
+
+    old_claim = {"claim": "An old claim.", "verdict": "neutral", "confidence": 0.5,
+                 "evidence_snippets": []}
+    vr = VerdictResult(verdict="uncertain", confidence=0.1, claim_verdicts=[old_claim],
+                       ensemble_score=0.5, reasoning_trace="")
+    with patch("api.routers.articles.run_verification_pipeline", return_value=vr):
+        resp = client.post("/articles/submit", json={"text": SAMPLE_ARTICLE},
+                           headers={"Authorization": f"Bearer {admin_token}"})
+    cv = client.get(f"/articles/{resp.json()['id']}").json()["verdict"]["claim_verdicts"][0]
+    assert cv["location"] is None and cv["regional_evidence"] == 0 and cv["in_region"] == []
+
+
 # ── Model registry endpoint ────────────────────────────────────────────────────
 
 def test_model_registry_no_auth(client):

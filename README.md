@@ -1,7 +1,7 @@
 # Paper Trail — Fake News Detection Platform
 
 Multi-model fake news detection with an agentic LangGraph verification pipeline,
-article persistence, JWT auth, and a human review queue.
+article persistence, JWT auth, and region-aware evidence retrieval.
 
 ## Repository layout
 
@@ -11,6 +11,7 @@ capstone-final/
 │   ├── agents/                # LangGraph pipeline nodes
 │   │   ├── state.py           # Shared TypedDict state (+ degradation reducer)
 │   │   ├── claim_extractor.py # Check-worthy claim selection (local, no LLM)
+│   │   ├── locator.py         # Where is each claim about? (place + precision level)
 │   │   ├── evidence_retriever.py # Entity queries + relevance-gated retrieval
 │   │   ├── evidence_cache.py  # On-disk search cache (determinism, quota)
 │   │   ├── sources.py         # Source trust tiers
@@ -31,12 +32,11 @@ capstone-final/
 │   ├── model_loader.py        # ModelRegistry (loads .joblib / .keras)
 │   ├── schemas.py             # Pydantic request/response models
 │   ├── database.py            # SQLAlchemy engine + session
-│   ├── orm.py                 # Article / Verdict / ReviewQueue tables
+│   ├── orm.py                 # Article / Verdict tables
 │   ├── auth.py                # JWT token creation/verification
 │   └── routers/
 │       ├── auth.py            # POST /auth/token
 │       ├── articles.py        # POST /articles/submit, GET /articles/{id}
-│       ├── review_queue.py    # GET /review-queue, POST /review-queue/{id}/resolve
 │       └── model_registry.py  # GET /models/registry
 ├── frontend/                  # Next.js frontend (Person A)
 ├── dataset/                   # Raw datasets (ISOT, LIAR, FakeNewsNet, …)
@@ -135,11 +135,9 @@ cd frontend && npm install && npm run dev
 | POST | `/auth/token` | — | Get JWT bearer token |
 | POST | `/articles/submit` | ✓ | Run pipeline, persist verdict |
 | GET | `/articles/{id}` | — | Retrieve stored verdict |
-| GET | `/review-queue` | — | Articles needing human review |
-| POST | `/review-queue/{id}/resolve` | ✓ | Analyst manual override |
 | GET | `/models/registry` | — | Registry for analytics dashboard |
 
-**Demo credentials:** `admin`/`admin123` or `analyst`/`analyst123`
+**Demo credentials:** `admin`/`admin123` or `analyst`/`analyst123` (both have the same access)
 
 ```bash
 # Get a token
@@ -200,8 +198,15 @@ report it as a critical degradation.
 
 **Abstention:** when the fused score falls inside the abstention band — or when
 NLI ran degraded, or no claim could be checked at all — the verdict is
-`uncertain`, `needs_human_review=true`, and the article is added to the review
-queue. Band edges are chosen on held-out data to hold a target precision.
+`uncertain`, with the reason in `reasoning_trace` and `degradations`. There is
+no human-review step: the pipeline always returns an answer on its own. Band
+edges are chosen on held-out data to hold a target precision.
+
+**Region-aware verification.** After claims are extracted, the `locate` stage
+works out where each claim is about — as precisely as the text supports, from a
+street or landmark up to a country — and the evidence stage then searches
+regional news for that place *in addition to* the usual global sources. See
+[docs/VERIFICATION_PIPELINE.md](docs/VERIFICATION_PIPELINE.md#stage-1b--locating-claims-region-aware).
 
 **Submission is asynchronous.** `POST /articles/submit` returns **202** with
 `status="processing"`; poll `GET /articles/{id}` until `completed` or `failed`.
@@ -259,12 +264,16 @@ Notable regression coverage:
 ## Database schema (for cross-team joins)
 
 ```
-articles     (id PK, url, text, status, submitted_at)
+articles     (id PK, url, text, status, stage, submitted_at)
 verdicts     (id PK, article_id FK, verdict, confidence, claim_verdicts JSON,
-              ensemble_score, reasoning_trace, needs_human_review, created_at)
-review_queue (id PK, article_id FK, verdict_id FK,
-              status, assigned_to, resolved_at, human_verdict, human_notes)
+              ensemble_score, reasoning_trace, degradations JSON, fused_score,
+              ai_model_version, created_at)
 ```
+
+`claim_verdicts` JSON includes each claim's `location` when one was found. The
+`review_queue` table and the `verdicts.needs_human_review` column were removed
+from the code; databases created earlier keep the old (now unused) table and
+column.
 
 **Person D:** join your source-credibility / analytics rows to `articles.id`.
 

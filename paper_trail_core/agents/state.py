@@ -34,6 +34,10 @@ class ClaimVerdict(TypedDict, total=False):
     top_relevance: float            # best claim<->snippet cosine after gating
     numeric_conflict: float         # in [0, 1]; see paper_trail_core/nlp/numeric.py
     sources: list[str]              # domains, positionally parallel to evidence_snippets
+    in_region: list[bool]           # parallel to evidence_snippets: from the claim's region
+    location: Optional[dict[str, Any]]   # where the claim is about, if the locator found one
+    search_scope: Optional[str]     # widest/narrowest region searched, e.g. "Pune, Maharashtra"
+    regional_evidence: int          # how many of the evidence snippets are in-region
     status: str                     # ok | no_hits | no_relevant | rate_limited | error
 
 
@@ -63,8 +67,16 @@ class PipelineState(TypedDict):
     translated_text: Optional[str]
     translation_confidence: Optional[float]
 
+    # Optional place the caller says the article is about ("Pune", "Kerala").
+    region_hint: Optional[str]
+
     # Populated by claim_extractor
     claims: list[str]
+
+    # Populated by locator: a place dict (or None) per claim, positionally
+    # parallel to `claims`, plus the place the article as a whole is about.
+    claim_locations: list[Optional[dict[str, Any]]]
+    article_location: Optional[dict[str, Any]]
 
     # Populated by evidence_retriever: [{claim, snippets, status}]
     evidence: list[dict[str, Any]]

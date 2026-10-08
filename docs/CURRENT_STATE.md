@@ -43,8 +43,8 @@ document follows the code.
 **Persistence:** SQLAlchemy + SQLite by default (`paper_trail.db`,
 Postgres-ready via `DATABASE_URL`). Three tables: `articles`, `verdicts`
 (verdict + confidence + JSON-encoded claim verdicts + JSON-encoded
-degradations + fused_score), `review_queue` (human override capture — see
-§4, "not built"). `api/orm.py` states `articles.id` is the intended shared FK
+degradations + fused_score). The `review_queue` table was removed along with
+human review. `api/orm.py` states `articles.id` is the intended shared FK
 for teammates' tables; no teammate tables exist in this repo (see §5).
 
 **Auth:** JWT (`api/auth.py`), two hardcoded demo users (`admin`/`admin123`,
@@ -216,5 +216,5 @@ provider SDK directly. The brief's §4 "LLM gateway" is net-new.
 | Multi-level rationale (phrase/claim/article) with citation-faithfulness check | `reasoning_trace` exists at article level only; no phrase-level attribution, no per-claim cited-URL rationale, no faithfulness check |
 | LLM gateway (routing/fallback/retry, prompt versioning, guardrails) | Does not exist; ad hoc optional LLM calls only |
 | Golden eval set (100+ cases, multi-language, text+image) | 30-case English-only golden set exists; needs multilingual/image expansion |
-| Human-review → retraining loop | Review queue captures human verdicts; nothing consumes them for retraining |
+| Human-review → retraining loop | Removed: human review is no longer part of the system |
 | `scripts/eval_all.py` | Does not exist as one script; `scripts/evaluate_pipeline.py` already covers a meaningful subset for the English pipeline |
