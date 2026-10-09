@@ -999,6 +999,9 @@ def retrieve_for_claim(claim: str, idx: int, location: dict[str, Any] | None = N
         take = extra[: room + max(0, int(_cfg("REGION_MAX_EXTRA_SNIPPETS", 2)))]
         for s in snippets:
             s.setdefault("in_region", _is_in_region(s, location))
+        if claim_mode:
+            for s in take:      # regional items skip the gate; mark them too
+                s["claim_mode"] = True
         out["snippets"] = snippets + take
         region["regional_snippets"] = len(take)
         if take and out["status"] != "ok":

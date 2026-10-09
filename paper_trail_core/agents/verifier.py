@@ -104,6 +104,30 @@ def _may_refute(snip: dict) -> bool:
         return True
     return float(snip.get("relevance", 0.0)) >= PARAPHRASE_RELEVANCE
 
+# A claim about a happening ("shut 57 stations from 9pm on Friday", "live
+# updates") is true or false at a moment. A static page cannot refute it, and a
+# news item about the same story is usually a different day's update with
+# different figures (17 stations closed on day 3, not 57 on day 1).
+_TIME_BOUND_RE = re.compile(
+    r"\b(?:mon|tues?|wednes|thurs?|fri|satur|sun)day\b"
+    r"|\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b"
+    r"|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b"
+    r"|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b"
+    r"|\b(?:live updates?|breaking|today|tonight|tomorrow|yesterday|this week|ahead of)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_time_bound(claim: str) -> bool:
+    return bool(_TIME_BOUND_RE.search(claim or ""))
+
+
+def _is_news_source(snip: dict) -> bool:
+    """A regional news item: an update on a story, not a reference page."""
+    return bool(snip.get("in_region")) and not str(
+        snip.get("domain", "")).endswith("wikipedia.org")
+
+
 # How much a detected numeric conflict may add to contradiction probability.
 # Deliberately partial: the NLI model already catches most numeric
 # contradictions on its own, and a figure that differs may be a revision or a
@@ -224,11 +248,18 @@ def aggregate_claim(
         top_relevance = max(top_relevance, float(snip.get("relevance", 0.0)))
 
         p_ent, p_con = res.entail, res.contradict
-        if snip.get("claim_mode") and not _may_refute(snip):
+        cannot_refute = False
+        if snip.get("claim_mode"):
+            cannot_refute = (
+                not _may_refute(snip)
+                or _is_news_source(snip)
+                or _is_time_bound(claim)
+            )
+        if cannot_refute:
             p_con = 0.0
 
         # Numeric disagreement the NLI head may have read as merely "unrelated".
-        nc = numeric_conflict(claim, snip.get("text", ""))
+        nc = 0.0 if cannot_refute else numeric_conflict(claim, snip.get("text", ""))
         if nc > 0:
             max_numeric = max(max_numeric, nc)
             p_con = min(1.0, p_con + NUMERIC_BOOST * nc)

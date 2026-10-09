@@ -326,3 +326,16 @@ def test_a_very_short_claim_is_accepted_in_claim_mode(claim_mode, monkeypatch):
 def test_the_same_short_claim_is_rejected_outside_claim_mode():
     vr = P.run_verification_pipeline("Tokyo is the capital of Japan.")
     assert vr.verdict == "uncertain" and any(d["kind"] == "text_too_short" for d in vr.degradations)
+
+
+def test_time_bound_claims_cannot_be_refuted_by_other_days_news():
+    from paper_trail_core.agents.verifier import _is_news_source, _is_time_bound
+
+    assert _is_time_bound(
+        "Delhi Metro to shut down 57 stations from 9pm on Friday till Saturday"
+    )
+    assert _is_time_bound("CJP Protest Live Updates: metro shut ahead of Oct 10 protest")
+    assert not _is_time_bound("The Gateway of India was completed in 1924.")
+    assert _is_news_source({"domain": "thehindu.com", "in_region": True})
+    assert not _is_news_source({"domain": "thehindu.com"})
+    assert not _is_news_source({"domain": "en.wikipedia.org"})
