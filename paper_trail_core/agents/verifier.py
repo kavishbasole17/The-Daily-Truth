@@ -303,6 +303,35 @@ def aggregate_claim(
     )
 
 
+def _attach_event_corroboration(cv: ClaimVerdict, claim: str, snippets: list[dict]) -> None:
+    """
+    For a time-bound short claim that nothing refutes, record whether recent
+    independent news items report the same event. It does not change the NLI
+    verdict; the claim-mode adjudicator reads these fields.
+    """
+    if cv.get("verdict") == "contradiction" or not _is_time_bound(claim):
+        return
+    if not any(s.get("claim_mode") for s in snippets):
+        return
+    try:
+        from config import settings
+        if not settings.EVENT_CORROBORATION:
+            return
+        from paper_trail_core.nlp.event_match import corroboration
+        c = corroboration(
+            claim, snippets,
+            min_snippets=settings.EVENT_MIN_SNIPPETS,
+            min_sources=settings.EVENT_MIN_SOURCES,
+            max_age_days=settings.EVENT_MAX_AGE_DAYS,
+        )
+    except Exception:   # noqa: BLE001 — corroboration is optional context
+        log.exception("verifier: event corroboration failed")
+        return
+    cv["event_corroborated"] = bool(c["corroborated"])
+    cv["corroborating_sources"] = c["sources"] if c["corroborated"] else []
+    cv["detail_mismatch"] = bool(c["detail_mismatch"]) if c["corroborated"] else False
+
+
 def is_informative(cv: ClaimVerdict) -> bool:
     """Whether a claim verdict earned the right to move the article-level score."""
     return (
@@ -451,6 +480,7 @@ def verify_claims_node(state: PipelineState) -> dict:
             [r for _, r in pairs],
             status=status if pairs or status != "ok" else "no_relevant",
         )
+        _attach_event_corroboration(cv, claim, snippets)
         # Region metadata is reported alongside the verdict; it plays no part in
         # computing it, so verdicts and fusion features are identical with or
         # without it.

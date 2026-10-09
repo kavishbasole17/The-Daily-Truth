@@ -121,6 +121,9 @@ class ClaimVerdictOut(BaseModel):
     search_scope:      Optional[str] = None    # narrowest region that returned evidence
     regional_evidence: int = 0                 # evidence snippets from the claim's region
     in_region:         list[bool] = []         # parallel to evidence_snippets
+    event_corroborated: bool = False           # recent independent outlets report the same event
+    corroborating_sources: list[str] = []
+    detail_mismatch: bool = False              # event confirmed, but the claim's figures differ
 
 
 class DegradationOut(BaseModel):

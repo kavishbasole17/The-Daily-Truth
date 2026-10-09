@@ -219,6 +219,18 @@ def compute_claim_verdict(
                if cv.get("verdict") == "contradiction" and is_informative(cv)
                and cv.get("contradict_mass", 0.0) >= c_min]
 
+    # A time-bound claim whose event several recent, independent outlets report
+    # counts as supported, but only to the capped confidence: it says the event
+    # happened, not that every figure in the claim is right.
+    corroborated = [cv for cv in claim_verdicts
+                    if cv.get("event_corroborated") and cv not in supported
+                    and cv.get("verdict") != "contradiction"]
+    try:
+        from config import settings
+        event_cap = settings.EVENT_CONFIDENCE_CAP
+    except ImportError:  # pragma: no cover
+        event_cap = 0.65
+
     n = len(claim_verdicts)
     forced_reason = None
     verdict, confidence = "uncertain", 0.0
@@ -234,6 +246,9 @@ def compute_claim_verdict(
     elif supported and not refuted and len(supported) * 2 >= n:
         verdict = "likely_real"
         confidence = round(min(cv["entail_mass"] for cv in supported), 4)
+    elif corroborated and not refuted and not supported and len(corroborated) * 2 >= n:
+        verdict = "likely_real"
+        confidence = event_cap
     elif supported and refuted:
         forced_reason = "the evidence supports some claims and refutes others"
     else:

@@ -195,6 +195,15 @@ function AssistantResult({ result, extractedText }) {
                                                 )}
                                             </p>
                                         )}
+                                        {cv.event_corroborated && (
+                                            <p className="claim-location">
+                                                <span className="evidence-source">event</span>
+                                                Reported by {cv.corroborating_sources.join(", ")}
+                                                {cv.detail_mismatch && (
+                                                    <span className="muted"> · figures differ from the reports</span>
+                                                )}
+                                            </p>
+                                        )}
                                         {cv.evidence_snippets.length > 0 && (
                                             <ul className="evidence-list">
                                                 {cv.evidence_snippets.map((s, j) => (

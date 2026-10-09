@@ -38,6 +38,9 @@ class ClaimVerdict(TypedDict, total=False):
     location: Optional[dict[str, Any]]   # where the claim is about, if the locator found one
     search_scope: Optional[str]     # widest/narrowest region searched, e.g. "Pune, Maharashtra"
     regional_evidence: int          # how many of the evidence snippets are in-region
+    event_corroborated: bool        # recent independent outlets report the same event
+    corroborating_sources: list[str]
+    detail_mismatch: bool           # corroborated, but the claim's figures differ from the reports
     status: str                     # ok | no_hits | no_relevant | rate_limited | error
 
 

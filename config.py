@@ -159,6 +159,15 @@ class Settings(BaseSettings):
     CLAIM_ENTAIL_MIN: float = 0.45      # evidence mass needed to call a claim supported
     CLAIM_CONTRADICT_MIN: float = 0.5   # evidence mass needed to call a claim refuted
 
+    # Event corroboration: a time-bound claim ("shut 57 stations from 9pm on
+    # Friday") is called likely_real, at a capped confidence, when enough recent
+    # independent news outlets report the same event. Off by default if unsure.
+    EVENT_CORROBORATION: bool = True
+    EVENT_MIN_SNIPPETS: int = 3
+    EVENT_MIN_SOURCES: int = 2
+    EVENT_MAX_AGE_DAYS: float = 7.0
+    EVENT_CONFIDENCE_CAP: float = 0.65
+
     # ------------------------------------------------------------------
     # JWT / auth
     # ------------------------------------------------------------------
