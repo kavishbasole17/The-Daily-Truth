@@ -137,7 +137,11 @@ function AssistantResult({ result, extractedText }) {
             <div className={`chat-verdict ${meta.className}`}>
                 <div>
                     <h2>{meta.label}</h2>
-                    <p>{Math.round(verdict.confidence * 100)}% confidence</p>
+                    <p>
+                        {verdict.verdict === "uncertain" && !verdict.confidence
+                            ? "Not enough evidence to decide"
+                            : `${Math.round(verdict.confidence * 100)}% confidence`}
+                    </p>
                 </div>
             </div>
 

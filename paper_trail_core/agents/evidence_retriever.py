@@ -56,6 +56,7 @@ except ImportError:  # pragma: no cover
     _BACKEND, _PROVIDER, _MAX_CALLS, _REL_MIN, _WORKERS = "live", "newsapi", 12, 0.35, 6
 
 from paper_trail_core.agents import evidence_cache
+from paper_trail_core.nlp.claim_mode import is_time_bound
 from paper_trail_core.agents.sources import TRUSTED_NEWS_DOMAINS, domain_of, trust_for
 from paper_trail_core.agents.state import PipelineState
 from paper_trail_core.degradations import degrade
@@ -585,6 +586,20 @@ _PROVIDER_MAP = {
 }
 
 
+def _restamp_trust(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Recompute `trust` from the current source table.
+
+    The cache stores what a provider returned, and `trust` was stamped when the
+    entry was written. Left alone, editing the source weights changes nothing for
+    up to EVIDENCE_CACHE_TTL_DAYS, so the weights are re-applied on every read.
+    """
+    for item in items:
+        if isinstance(item, dict) and item.get("domain"):
+            item["trust"] = trust_for(item["domain"])
+    return items
+
+
 def _search_cached(provider: str, query: str) -> tuple[list[dict[str, Any]], str, bool]:
     """
     Run one provider query, going through the cache.
@@ -595,7 +610,7 @@ def _search_cached(provider: str, query: str) -> tuple[list[dict[str, Any]], str
     """
     cached = evidence_cache.get(provider, query)
     if cached is not None:
-        return cached, "ok", True
+        return _restamp_trust(cached), "ok", True
 
     if _BACKEND == "cache_only":
         return [], "ok", False
@@ -608,7 +623,10 @@ def _search_cached(provider: str, query: str) -> tuple[list[dict[str, Any]], str
     for attempt in range(2):
         try:
             results = fn(query)
-            evidence_cache.put(provider, query, results)
+            # With no key NewsAPI returns [] without asking anything; caching that
+            # would hide the provider for the whole TTL once a key is added.
+            if not (provider == "newsapi" and not getattr(settings, "NEWS_API_KEY", None)):
+                evidence_cache.put(provider, query, results)
             return results, "ok", False
         except RuntimeError as exc:
             if "rate_limited" in str(exc):
@@ -814,7 +832,7 @@ def _search_regional_cached(provider: str, query: str, country_code: str) -> tup
     cache_provider = f"{provider}:{(country_code or 'xx').lower()}"
     cached = evidence_cache.get(cache_provider, query)
     if cached is not None:
-        return cached, "ok"
+        return _restamp_trust(cached), "ok"
     if _BACKEND == "cache_only":
         return [], "ok"
 
@@ -939,6 +957,28 @@ def regional_evidence(claim: str, location: dict[str, Any]) -> tuple[list[dict[s
 
 # ── Per-claim retrieval ───────────────────────────────────────────────────────
 
+def _merge_by_weight(claim: str, base: list[dict[str, Any]], regional: list[dict[str, Any]],
+                     claim_mode: bool) -> list[dict[str, Any]]:
+    """
+    Combine global and regional evidence, best-weighted first.
+
+    Regional news used to be appended after the global list, so Wikipedia always
+    rendered ahead of Indian outlets whatever their weights. For a claim about a
+    happening, a Wikipedia page is background rather than a report, so once there
+    are at least two news items it is kept only as a single fallback.
+    """
+    merged = base + regional
+    merged.sort(key=lambda c: (-c["trust"] * c["relevance"], -c["relevance"], c.get("url", "")))
+    if claim_mode and is_time_bound(claim):
+        news = [c for c in merged if c.get("provider") != "wikipedia"]
+        if len(news) >= 2:
+            wiki = [c for c in merged if c.get("provider") == "wikipedia"][:1]
+            merged = sorted(news + wiki, key=lambda c: (-c["trust"] * c["relevance"],
+                                                         -c["relevance"], c.get("url", "")))
+    cap = MAX_SNIPPETS_PER_CLAIM + max(0, int(_cfg("REGION_MAX_EXTRA_SNIPPETS", 2)))
+    return merged[:cap]
+
+
 def retrieve_for_claim(claim: str, idx: int, location: dict[str, Any] | None = None,
                        claim_mode: bool = False) -> dict[str, Any]:
     """
@@ -1002,7 +1042,7 @@ def retrieve_for_claim(claim: str, idx: int, location: dict[str, Any] | None = N
         if claim_mode:
             for s in take:      # regional items skip the gate; mark them too
                 s["claim_mode"] = True
-        out["snippets"] = snippets + take
+        out["snippets"] = _merge_by_weight(claim, snippets, take, claim_mode)
         region["regional_snippets"] = len(take)
         if take and out["status"] != "ok":
             out["status"] = "ok"

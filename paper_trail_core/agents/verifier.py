@@ -45,6 +45,7 @@ except ImportError:  # pragma: no cover
 
 from paper_trail_core.agents.state import ClaimVerdict, PipelineState
 from paper_trail_core.degradations import degrade
+from paper_trail_core.nlp.claim_mode import is_time_bound
 from paper_trail_core.nlp.nli import NLIResult, infer_batch, is_available
 from paper_trail_core.nlp.numeric import numeric_conflict
 from paper_trail_core.nlp.segmentation import segment_sentences
@@ -104,22 +105,7 @@ def _may_refute(snip: dict) -> bool:
         return True
     return float(snip.get("relevance", 0.0)) >= PARAPHRASE_RELEVANCE
 
-# A claim about a happening ("shut 57 stations from 9pm on Friday", "live
-# updates") is true or false at a moment. A static page cannot refute it, and a
-# news item about the same story is usually a different day's update with
-# different figures (17 stations closed on day 3, not 57 on day 1).
-_TIME_BOUND_RE = re.compile(
-    r"\b(?:mon|tues?|wednes|thurs?|fri|satur|sun)day\b"
-    r"|\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b"
-    r"|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b"
-    r"|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b"
-    r"|\b(?:live updates?|breaking|today|tonight|tomorrow|yesterday|this week|ahead of)\b",
-    re.IGNORECASE,
-)
-
-
-def _is_time_bound(claim: str) -> bool:
-    return bool(_TIME_BOUND_RE.search(claim or ""))
+_is_time_bound = is_time_bound
 
 
 def _is_news_source(snip: dict) -> bool:

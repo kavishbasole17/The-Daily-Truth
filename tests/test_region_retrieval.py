@@ -60,7 +60,7 @@ def test_claim_without_a_location_takes_the_original_path(monkeypatch):
     assert [s["url"] for s in out["snippets"]] == [GLOBAL_HIT["url"]]
 
 
-def test_regional_evidence_is_appended_after_the_global_evidence(monkeypatch):
+def test_regional_evidence_is_added_and_ordered_by_weight(monkeypatch):
     monkeypatch.setattr(ER, "_search_regional_cached",
                         lambda p, q, cc: ([_regional("https://thehindu.com/a"),
                                            _regional("https://ndtv.com/b", domain="ndtv.com", trust=0.8)], "ok"))
@@ -68,8 +68,12 @@ def test_regional_evidence_is_appended_after_the_global_evidence(monkeypatch):
     out = ER.retrieve_for_claim(CLAIM, 0, location=PUNE)
 
     urls = [s["url"] for s in out["snippets"]]
-    assert urls[: len(base["snippets"])] == [s["url"] for s in base["snippets"]]
-    assert urls[len(base["snippets"]):] == ["https://thehindu.com/a", "https://ndtv.com/b"]
+    # Nothing retrieved globally is dropped, and the regional items are added.
+    assert set(s["url"] for s in base["snippets"]) <= set(urls)
+    assert {"https://thehindu.com/a", "https://ndtv.com/b"} <= set(urls)
+    # Best-weighted first: trust x relevance never increases down the list.
+    weights = [s["trust"] * s["relevance"] for s in out["snippets"]]
+    assert weights == sorted(weights, reverse=True)
     assert out["region"]["regional_snippets"] == 2
 
 
@@ -280,7 +284,7 @@ def test_google_news_rss_is_parsed(monkeypatch):
     assert len(out) == 1
     assert out[0]["text"] == "Khadakwasla Dam discharge floods Pune."
     assert out[0]["domain"] == "thehindu.com"
-    assert out[0]["trust"] == pytest.approx(0.9)
+    assert out[0]["trust"] == pytest.approx(0.95)
     assert seen["params"]["gl"] == "IN" and seen["params"]["ceid"] == "IN:en"
 
 

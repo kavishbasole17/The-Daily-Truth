@@ -258,8 +258,11 @@ def compute_claim_verdict(
     mean_support = (sum(cv.get("support", 0.0) for cv in informative) / len(informative)
                     if informative else 0.0)
     p_real = round(max(0.0, min(1.0, 0.5 + 0.5 * mean_support)), 4)
+    # An abstention carries no confidence. `0.5 + 0.5 * mean_support` is ~0.5
+    # whenever the evidence is neutral, so reporting max(p, 1 - p) showed the
+    # same "50%" on every such message.
     if verdict == "uncertain":
-        confidence = round(max(p_real, 1.0 - p_real), 4)
+        confidence = 0.0
 
     return {
         "verdict": verdict,

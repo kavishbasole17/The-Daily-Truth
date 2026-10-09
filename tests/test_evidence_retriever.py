@@ -102,7 +102,7 @@ def test_domain_extraction(value, expected):
 
 
 def test_trust_ordering():
-    assert trust_for("reuters.com") > trust_for("en.wikipedia.org")
+    assert trust_for("ptinews.com") > trust_for("en.wikipedia.org")
     assert trust_for("en.wikipedia.org") > trust_for("some-random-blog.example")
 
 
@@ -219,3 +219,53 @@ def test_corrupt_entry_is_a_miss_not_an_error(tmp_path):
         fh.write("{not valid json")
 
     assert evidence_cache.get("wikipedia", "q", base_dir=base) is None
+
+
+def test_cached_trust_is_restamped_from_current_weights(tmp_path, monkeypatch):
+    from paper_trail_core.agents import evidence_cache
+    stale = [{"text": "Rajdhani Express: a train.", "url": "https://en.wikipedia.org/wiki/X",
+              "domain": "en.wikipedia.org", "trust": 0.85, "provider": "wikipedia"}]
+    monkeypatch.setattr(evidence_cache, "get", lambda provider, query, *a, **k: stale)
+    results, status, hit = ER._search_cached("wikipedia", "anything")
+    assert hit and results[0]["trust"] == trust_for("en.wikipedia.org") < 0.85
+
+
+def _snip(domain, provider, rel, in_region=True):
+    return {"text": domain, "url": f"https://{domain}/a", "domain": domain, "trust": trust_for(domain),
+            "relevance": rel, "provider": provider, "in_region": in_region}
+
+
+def test_merge_orders_indian_news_before_wikipedia():
+    base = [_snip("en.wikipedia.org", "wikipedia", 0.70)]
+    regional = [_snip("thehindu.com", "gnews_rss", 0.58), _snip("indianexpress.com", "gnews_rss", 0.60)]
+    merged = ER._merge_by_weight("Trains were cancelled on Friday", base, regional, claim_mode=False)
+    assert merged[-1]["domain"] == "en.wikipedia.org"
+
+
+def test_time_bound_claim_keeps_one_wikipedia_fallback():
+    wiki = [_snip("en.wikipedia.org", "wikipedia", 0.70), _snip("en.wikipedia.org", "wikipedia", 0.69)]
+    wiki[1]["url"] = "https://en.wikipedia.org/b"
+    regional = [_snip("thehindu.com", "gnews_rss", 0.58), _snip("indianexpress.com", "gnews_rss", 0.60)]
+    claim = "Trains were cancelled on October 10"
+    merged = ER._merge_by_weight(claim, wiki, regional, claim_mode=True)
+    assert sum(1 for m in merged if m["provider"] == "wikipedia") == 1
+    # an evergreen claim keeps every Wikipedia page
+    merged = ER._merge_by_weight("Tokyo is the capital of Japan", wiki, regional, claim_mode=True)
+    assert sum(1 for m in merged if m["provider"] == "wikipedia") == 2
+
+
+def test_time_bound_claim_with_no_news_keeps_wikipedia():
+    wiki = [_snip("en.wikipedia.org", "wikipedia", 0.70)]
+    merged = ER._merge_by_weight("Trains were cancelled on October 10", wiki, [], claim_mode=True)
+    assert len(merged) == 1
+
+
+def test_keyless_newsapi_result_is_not_cached(monkeypatch):
+    put_calls = []
+    monkeypatch.setattr(evidence_cache, "get", lambda *a, **k: None)
+    monkeypatch.setattr(evidence_cache, "put", lambda *a, **k: put_calls.append(a))
+    monkeypatch.setattr(ER, "_BACKEND", "live")
+    monkeypatch.setattr(ER.settings, "NEWS_API_KEY", None, raising=False)
+    monkeypatch.setitem(ER._PROVIDER_MAP, "newsapi", lambda q: [])
+    ER._search_cached("newsapi", "some query")
+    assert put_calls == []

@@ -35,3 +35,21 @@ def is_claim_text(text: str) -> bool:
         return False
     text = (text or "").strip()
     return 0 < len(text) <= max_chars and count_sentences(text) <= max_sentences
+
+
+# A claim about a happening ("shut 57 stations from 9pm on Friday", "live
+# updates") is true or false at a moment. A static page cannot refute it, and a
+# news item about the same story is usually a different day's update with
+# different figures (17 stations closed on day 3, not 57 on day 1).
+_TIME_BOUND_RE = re.compile(
+    r"\b(?:mon|tues?|wednes|thurs?|fri|satur|sun)day\b"
+    r"|\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b"
+    r"|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b"
+    r"|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b"
+    r"|\b(?:live updates?|breaking|today|tonight|tomorrow|yesterday|this week|ahead of)\b",
+    re.IGNORECASE,
+)
+
+
+def is_time_bound(claim: str) -> bool:
+    return bool(_TIME_BOUND_RE.search(claim or ""))

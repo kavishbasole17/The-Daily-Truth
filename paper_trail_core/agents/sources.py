@@ -33,19 +33,29 @@ _MAJOR = {
     "abcnews.go.com": 0.85, "nbcnews.com": 0.85, "cnn.com": 0.8,
     "axios.com": 0.85, "politico.com": 0.85, "usatoday.com": 0.8,
     "aljazeera.com": 0.85, "dw.com": 0.85,
-    # India
-    "thehindu.com": 0.9, "indianexpress.com": 0.85,
-    "hindustantimes.com": 0.85, "livemint.com": 0.85,
-    "timesofindia.indiatimes.com": 0.8, "ndtv.com": 0.8,
     # Asia-Pacific
     "japantimes.co.jp": 0.85, "scmp.com": 0.8, "abc.net.au": 0.9,
     "straitstimes.com": 0.8,
 }
 
+# Indian outlets. The product serves Indian readers, so these outrank foreign
+# outlets of comparable standing: wires and the government's own releases first,
+# then the national dailies.
+_INDIA = {
+    "ptinews.com": 1.0, "aninews.in": 0.95, "pib.gov.in": 1.0,
+    "thehindu.com": 0.95, "indianexpress.com": 0.92,
+    "hindustantimes.com": 0.92, "livemint.com": 0.9,
+    "timesofindia.indiatimes.com": 0.9, "ndtv.com": 0.9,
+    "indiatoday.in": 0.88, "business-standard.com": 0.9,
+    "economictimes.indiatimes.com": 0.88, "deccanherald.com": 0.88,
+    "theprint.in": 0.85, "scroll.in": 0.85, "thewire.in": 0.82,
+    "news18.com": 0.82, "telegraphindia.com": 0.88, "thehindubusinessline.com": 0.9,
+}
+
 # Reference sources — excellent for settled facts, slow on breaking events.
 _REFERENCE = {
-    "wikipedia.org": 0.85,
-    "en.wikipedia.org": 0.85,
+    "wikipedia.org": 0.6,
+    "en.wikipedia.org": 0.6,
     "who.int": 0.95,
     "un.org": 0.9,
     "nasa.gov": 0.95,
@@ -56,15 +66,18 @@ _REFERENCE = {
     "worldbank.org": 0.9,
 }
 
-TRUST: dict[str, float] = {**_WIRE, **_MAJOR, **_REFERENCE}
+TRUST: dict[str, float] = {**_WIRE, **_MAJOR, **_INDIA, **_REFERENCE}
 
 DEFAULT_TRUST = 0.5
+# An unlisted Indian domain (.in / .co.in) is still more relevant to an Indian
+# reader than an unlisted foreign one, so it starts a little above the default.
+INDIAN_DEFAULT_TRUST = 0.65
 
 # Domains queried through NewsAPI's `domains` filter. `domains` rather than
 # NewsAPI's fixed `sources` catalogue: `sources` has very thin non-US/UK
 # coverage, and combining both in one request silently drops the `domains`
 # filter, so international outlets never actually got queried.
-TRUSTED_NEWS_DOMAINS = [d for d in {**_WIRE, **_MAJOR} if "." in d]
+TRUSTED_NEWS_DOMAINS = [d for d in {**_INDIA, **_WIRE, **_MAJOR} if "." in d]
 
 
 # Display names NewsAPI reports that don't reduce to their domain by any
@@ -141,17 +154,58 @@ def domain_of(url_or_name: str) -> str:
     return lowered
 
 
+def is_indian(domain: str) -> bool:
+    """True for a listed Indian outlet or any .in / .co.in / .gov.in domain."""
+    if not domain:
+        return False
+    if domain in _INDIA or any(domain.endswith("." + d) for d in _INDIA):
+        return True
+    return domain == "in" or domain.endswith(".in")
+
+
+def _foreign_factor() -> float:
+    try:
+        from config import settings
+        return float(settings.FOREIGN_NEWS_FACTOR)
+    except Exception:  # pragma: no cover
+        return 0.7
+
+
 def trust_for(url_or_name: str) -> float:
-    """Trust weight in [0, 1] for a source. Unknown sources get DEFAULT_TRUST."""
+    """
+    Trust weight in [0, 1] for a source. Unknown sources get DEFAULT_TRUST.
+
+    Foreign news outlets are scaled by FOREIGN_NEWS_FACTOR so Indian outlets
+    outrank them; reference bodies (WHO, NASA, UN...) are not news and are left
+    alone.
+    """
     domain = domain_of(url_or_name)
     if not domain:
         return DEFAULT_TRUST
+    base = _lookup(domain)
+    if base is None:
+        return INDIAN_DEFAULT_TRUST if is_indian(domain) else DEFAULT_TRUST
+    if is_indian(domain) or _is_reference(domain):
+        return base
+    return round(base * _foreign_factor(), 4)
+
+
+def _registrable_match(domain: str):
     if domain in TRUST:
-        return TRUST[domain]
-    # Match subdomains against their registrable parent (e.g. edition.cnn.com).
+        return domain
     parts = domain.split(".")
     for i in range(len(parts) - 1):
         parent = ".".join(parts[i:])
         if parent in TRUST:
-            return TRUST[parent]
-    return DEFAULT_TRUST
+            return parent
+    return None
+
+
+def _lookup(domain: str):
+    key = _registrable_match(domain)
+    return TRUST[key] if key else None
+
+
+def _is_reference(domain: str) -> bool:
+    key = _registrable_match(domain)
+    return key in _REFERENCE if key else False

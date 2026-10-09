@@ -156,7 +156,9 @@ class Settings(BaseSettings):
     CLAIM_MODE_MAX_CHARS: int = 300
     CLAIM_MODE_MAX_SENTENCES: int = 2
     CLAIM_MODE_MIN_CHARS: int = 10      # "Tokyo is the capital of Japan." is a claim
-    CLAIM_ENTAIL_MIN: float = 0.45      # evidence mass needed to call a claim supported
+    # Indian outlets outrank foreign ones: foreign news domains' trust is scaled by this.
+    FOREIGN_NEWS_FACTOR: float = 0.7
+    CLAIM_ENTAIL_MIN: float = 0.45     # evidence mass needed to call a claim supported
     CLAIM_CONTRADICT_MIN: float = 0.5   # evidence mass needed to call a claim refuted
 
     # Event corroboration: a time-bound claim ("shut 57 stations from 9pm on
