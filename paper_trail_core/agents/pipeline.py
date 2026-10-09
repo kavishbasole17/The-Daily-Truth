@@ -428,11 +428,17 @@ def run_verification_pipeline(
     log.info("pipeline: starting (text_len=%d)", len(text))
 
     # Input guards — reject before spending model time, with a real explanation.
-    if len(text) < MIN_ARTICLE_CHARS:
+    min_chars = MIN_ARTICLE_CHARS
+    try:
+        if settings.CLAIM_MODE:
+            min_chars = min(min_chars, int(settings.CLAIM_MODE_MIN_CHARS))
+    except Exception:  # pragma: no cover
+        pass
+    if len(text) < min_chars:
         return _guarded_result(
             "uncertain",
             f"Article is too short to verify ({len(text)} characters; "
-            f"{MIN_ARTICLE_CHARS} required).",
+            f"{min_chars} required).",
             degrade("pipeline", "text_too_short",
                     f"Submitted text was {len(text)} characters.", severity="critical"),
         )

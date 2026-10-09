@@ -80,6 +80,30 @@ CONTRADICTION_MARGIN = 0.10
 # if its best evidence was reasonably on-topic.
 INFORMATIVE_WEIGHT_FLOOR = 0.25
 
+# In claim mode a page is "anchored" when its title appears in the claim. Only
+# the pages about the first two things the claim names (the subject, and usually
+# where it is) may refute it. A page for something mentioned in passing ("... on
+# the Arabian Sea") says nothing about the subject, and an NLI model reads that
+# silence as contradiction.
+SUBJECT_RANK_LIMIT = 2
+
+# A near-paraphrase of the claim may refute it whatever page it is on.
+PARAPHRASE_RELEVANCE = 0.80
+
+
+def _may_refute(snip: dict) -> bool:
+    """
+    In claim mode a snippet may only *refute* if it is about the claim's own
+    subject: a page named after one of the first things the claim mentions, or a
+    near-paraphrase of the claim. A neighbouring page that merely scored well
+    (the Blue Nile for a claim about the Nile, Agra Fort for one about the Red
+    Fort) holds true facts about something else, which an NLI model reads as
+    contradiction. Such pages can still support a claim.
+    """
+    if snip.get("anchored") and snip.get("subject_rank", 99) < SUBJECT_RANK_LIMIT:
+        return True
+    return float(snip.get("relevance", 0.0)) >= PARAPHRASE_RELEVANCE
+
 # How much a detected numeric conflict may add to contradiction probability.
 # Deliberately partial: the NLI model already catches most numeric
 # contradictions on its own, and a figure that differs may be a revision or a
@@ -200,6 +224,8 @@ def aggregate_claim(
         top_relevance = max(top_relevance, float(snip.get("relevance", 0.0)))
 
         p_ent, p_con = res.entail, res.contradict
+        if snip.get("claim_mode") and not _may_refute(snip):
+            p_con = 0.0
 
         # Numeric disagreement the NLI head may have read as merely "unrelated".
         nc = numeric_conflict(claim, snip.get("text", ""))
@@ -331,7 +357,13 @@ def verify_claims_node(state: PipelineState) -> dict:
             continue
         for si, snip in enumerate(item.get("snippets", [])):
             weight = scale_relevance(float(snip.get("relevance", 0.0))) * float(snip.get("trust", 0.5))
-            for premise in _premise_sentences(snip.get("text", "")):
+            premises = _premise_sentences(snip.get("text", ""))
+            if snip.get("claim_mode") and snip.get("anchored"):
+                # Later lead sentences refer to the subject as "it" / "the fort";
+                # naming the page keeps them about that subject.
+                title = (snip.get("text") or "").split(":", 1)[0].strip()
+                premises = [p if i == 0 else f"{title}: {p}" for i, p in enumerate(premises)]
+            for premise in premises:
                 plan.append((ci, si, premise, claim, weight))
 
     # Budget cap: keep the highest-weight pairs so a pathological article can't

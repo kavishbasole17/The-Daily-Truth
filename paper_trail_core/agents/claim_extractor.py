@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import os
 import sys
 
@@ -178,8 +179,8 @@ def _reject_hallucinations(text: str, claims: list[str], min_cosine: float = 0.5
 
 # ── Node ──────────────────────────────────────────────────────────────────────
 
-def extract_claims_node(state: PipelineState) -> dict:
-    """LangGraph node: extract factual claims from the article."""
+def _extract_claims_impl(state: PipelineState) -> dict:
+    """The article path: segment, rank by check-worthiness, deduplicate."""
     text = state.get("article_text", "")
     log.info("claim_extractor: running (backend=%s)", _BACKEND)
 
@@ -243,3 +244,73 @@ def extract_claims_node(state: PipelineState) -> dict:
             ),
         }
     return {"claims": claims, "degradations": []}
+
+
+# ── Claim mode: short inputs ──────────────────────────────────────────────────
+#
+# A person who types one sentence is asking about that sentence, so (a) it is
+# check-worthy by definition, and (b) a compound sentence is several claims.
+# "X is A and is B" is checked as "X is A" and "X is B": a single evidence
+# sentence rarely states both halves, so checking the whole at once reads real,
+# true claims as "neutral".
+
+_AUX = (r"is|are|was|were|has|have|had|lies|lie|flows|flow|runs|run|stands|stand|"
+        r"overlooks|overlook|crosses|cross|connects|connect|opened|built|located|"
+        r"remains|remain|serves|serve|borders|border|sits|forms|form|contains|holds|"
+        r"became|become|covers|cover|hosts|host")
+_COMPOUND_RE = re.compile(
+    rf"^(?P<subj>.+?)\s+(?P<v1>{_AUX})\s+(?P<r1>.+?)\s+and\s+(?P<v2>{_AUX})\s+(?P<r2>.+?)\s*[.!]?$",
+    re.IGNORECASE,
+)
+_CLAUSE_WORDS = re.compile(r"\b(that|which|who|whom|where|when|because|although|while|if|since)\b",
+                           re.IGNORECASE)
+
+
+def split_compound(claim: str) -> list[str]:
+    """
+    Split "X is A and is B" into ["X is A.", "X is B."]; anything else, or
+    anything it is not sure about, comes back unchanged.
+    """
+    text = " ".join((claim or "").split())
+    m = _COMPOUND_RE.match(text)
+    if not m:
+        return [claim]
+    subj, v1, r1, v2, r2 = (m.group(k) for k in ("subj", "v1", "r1", "v2", "r2"))
+    # A subject that already contains a clause ("the statue that stands in ...")
+    # would be cut in the wrong place; and a further "and <verb>" means more than
+    # two parts, which this does not try to untangle.
+    if _CLAUSE_WORDS.search(subj) or re.search(rf"\band\s+(?:{_AUX})\b", r2, re.IGNORECASE):
+        return [claim]
+    if len(r1.split()) < 2 or len(r2.split()) < 1:
+        return [claim]
+    return [f"{subj} {v1} {r1}.", f"{subj} {v2} {r2.rstrip('.!')}."]
+
+
+def extract_claims_node(state: PipelineState) -> dict:
+    """LangGraph node: extract factual claims from the article."""
+    out = _extract_claims_impl(state)
+    text = (state.get("article_text") or "").strip()
+
+    from paper_trail_core.nlp.claim_mode import is_claim_text
+    if not is_claim_text(text):
+        return out
+    from config import settings
+
+    claims = list(out.get("claims") or [])
+    degradations = list(out.get("degradations") or [])
+    min_chars = int(getattr(settings, "CLAIM_MODE_MIN_CHARS", 10))
+    if not claims and len(text) >= min_chars:
+        # The ranker found nothing "check-worthy" (or the text is under the
+        # article minimum), but this is a claim someone typed in: check it anyway.
+        claims = [text]
+        degradations = [d for d in degradations
+                        if d.get("kind") not in ("no_checkable_claims", "text_too_short")]
+        out = {k: v for k, v in out.items() if k != "error"}
+
+    expanded: list[str] = []
+    for c in claims:
+        expanded.extend(split_compound(c))
+    out = dict(out)
+    out["claims"] = expanded
+    out["degradations"] = degradations
+    return out

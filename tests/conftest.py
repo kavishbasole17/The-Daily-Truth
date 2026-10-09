@@ -52,6 +52,18 @@ def _no_live_geocoding(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "GEOCODER_CACHE_DIR", str(tmp_path / "geo"))
 
 
+@pytest.fixture(autouse=True)
+def _article_path_by_default(monkeypatch):
+    """
+    Most tests exercise the article path (style classifier + learned fusion), and
+    their sample texts happen to be under the claim-mode length limit. Claim mode
+    is switched off here and enabled explicitly by the tests that cover it.
+    """
+    from config import settings
+
+    monkeypatch.setattr(settings, "CLAIM_MODE", False)
+
+
 @pytest.fixture
 def offline_settings(monkeypatch):
     """Force every stage onto a backend that needs no network and no model."""

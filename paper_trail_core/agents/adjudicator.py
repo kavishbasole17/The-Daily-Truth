@@ -96,7 +96,10 @@ def _build_trace(
         f"  Strongest refutation      : {features.get('min_support', 0.0):+.3f}",
         f"  Fusion method             : {method}",
         f"  Combined P(real)          : {p_real:.3f}",
-        f"  Abstention band           : {low:.3f} .. {high:.3f}",
+        (f"  Decision rule             : short claim - evidence only (supported >= {high:.2f}, "
+         f"refuted >= {low:.2f}); style classifier not used"
+         if method == "evidence_rule"
+         else f"  Abstention band           : {low:.3f} .. {high:.3f}"),
         "",
         f"VERDICT: {verdict}  (confidence {confidence:.1%})",
     ]
@@ -174,6 +177,92 @@ def compute_verdict(
     }
 
 
+def compute_claim_verdict(
+    ensemble_score: float,
+    claim_verdicts: list[ClaimVerdict],
+    retrieval_stats: Optional[dict] = None,
+    nli_degraded: bool = False,
+    entail_min: Optional[float] = None,
+    contradict_min: Optional[float] = None,
+) -> dict:
+    """
+    Verdict for a short input, decided on evidence alone.
+
+    The style classifier (`ensemble_score`) is reported but not used: it was
+    fitted on whole articles and is out of distribution on a sentence. The rule
+    is deliberately simple and asymmetric in what it refuses to do:
+
+      * a claim the evidence refutes (contradiction mass >= contradict_min) and
+        nothing supports      -> likely_fake
+      * claims the evidence supports (entailment mass >= entail_min), none
+        refuted, and at least half of them checked -> likely_real
+      * anything else (no evidence, neutral evidence, mixed signals) -> uncertain
+
+    "No evidence" never becomes "fake"; that is what uncertain is for.
+    """
+    from paper_trail_core.agents.verifier import is_informative
+
+    try:
+        from config import settings
+        e_min = settings.CLAIM_ENTAIL_MIN if entail_min is None else entail_min
+        c_min = settings.CLAIM_CONTRADICT_MIN if contradict_min is None else contradict_min
+    except ImportError:  # pragma: no cover
+        e_min = 0.5 if entail_min is None else entail_min
+        c_min = 0.5 if contradict_min is None else contradict_min
+
+    features = build_features(ensemble_score, claim_verdicts, retrieval_stats, nli_degraded)
+
+    supported = [cv for cv in claim_verdicts
+                 if cv.get("verdict") == "entailment" and is_informative(cv)
+                 and cv.get("entail_mass", 0.0) >= e_min]
+    refuted = [cv for cv in claim_verdicts
+               if cv.get("verdict") == "contradiction" and is_informative(cv)
+               and cv.get("contradict_mass", 0.0) >= c_min]
+
+    n = len(claim_verdicts)
+    forced_reason = None
+    verdict, confidence = "uncertain", 0.0
+
+    if nli_degraded:
+        forced_reason = ("claim checking ran on the degraded word-overlap backend, "
+                         "which cannot reliably detect contradiction")
+    elif n == 0:
+        forced_reason = "no checkable claim was found in the text"
+    elif refuted and not supported:
+        verdict = "likely_fake"
+        confidence = round(max(cv["contradict_mass"] for cv in refuted), 4)
+    elif supported and not refuted and len(supported) * 2 >= n:
+        verdict = "likely_real"
+        confidence = round(min(cv["entail_mass"] for cv in supported), 4)
+    elif supported and refuted:
+        forced_reason = "the evidence supports some claims and refutes others"
+    else:
+        forced_reason = "the evidence found neither clearly supports nor refutes the claim"
+
+    informative = [cv for cv in claim_verdicts if is_informative(cv)]
+    mean_support = (sum(cv.get("support", 0.0) for cv in informative) / len(informative)
+                    if informative else 0.0)
+    p_real = round(max(0.0, min(1.0, 0.5 + 0.5 * mean_support)), 4)
+    if verdict == "uncertain":
+        confidence = round(max(p_real, 1.0 - p_real), 4)
+
+    return {
+        "verdict": verdict,
+        "confidence": confidence,
+        "final_score": p_real,
+        "fused_score": p_real,
+        "fusion_method": "evidence_rule",
+        "features": features,
+        "forced_reason": forced_reason,
+        "thresholds": {"low": c_min, "high": e_min},
+    }
+
+
+def _is_claim_mode(state: PipelineState) -> bool:
+    from paper_trail_core.nlp.claim_mode import is_claim_text
+    return is_claim_text(state.get("article_text") or "")
+
+
 def adjudicate_node(state: PipelineState) -> dict:
     """LangGraph node: fuse all signals into the final verdict."""
     ensemble_score = state.get("ensemble_score", 0.5)
@@ -182,9 +271,14 @@ def adjudicate_node(state: PipelineState) -> dict:
     nli_degraded = bool(state.get("nli_degraded", False))
     prior_degradations = list(state.get("degradations", []))
 
-    result = compute_verdict(
-        ensemble_score, claim_verdicts, retrieval_stats, nli_degraded
-    )
+    if _is_claim_mode(state):
+        result = compute_claim_verdict(
+            ensemble_score, claim_verdicts, retrieval_stats, nli_degraded
+        )
+    else:
+        result = compute_verdict(
+            ensemble_score, claim_verdicts, retrieval_stats, nli_degraded
+        )
 
     new_degradations: list = []
     if result["fusion_method"] == "heuristic_fallback":

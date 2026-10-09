@@ -142,6 +142,24 @@ class Settings(BaseSettings):
     REGION_MAX_EXTRA_SNIPPETS: int = 2     # regional snippets allowed on top of the usual cap
 
     # ------------------------------------------------------------------
+    # Claim mode (short inputs)
+    # ------------------------------------------------------------------
+    # The style classifier and the fusion model were fitted on whole articles.
+    # On a one-sentence claim the classifier is out of distribution (it will say
+    # "real" at 0.99 about a false sentence), so for short inputs the verdict is
+    # decided on evidence alone: supported -> likely_real, contradicted ->
+    # likely_fake, anything inconclusive -> uncertain. Longer text is untouched.
+    CLAIM_MODE: bool = True
+    # A claim is one or two sentences. Whole articles (3+ sentences) stay on the
+    # article path: measured on the golden set, claim mode commits to only 10% of
+    # them where the article path commits to 57%.
+    CLAIM_MODE_MAX_CHARS: int = 300
+    CLAIM_MODE_MAX_SENTENCES: int = 2
+    CLAIM_MODE_MIN_CHARS: int = 10      # "Tokyo is the capital of Japan." is a claim
+    CLAIM_ENTAIL_MIN: float = 0.45      # evidence mass needed to call a claim supported
+    CLAIM_CONTRADICT_MIN: float = 0.5   # evidence mass needed to call a claim refuted
+
+    # ------------------------------------------------------------------
     # JWT / auth
     # ------------------------------------------------------------------
     JWT_SECRET_KEY: str = "dev-secret-key-CHANGE-IN-PRODUCTION"

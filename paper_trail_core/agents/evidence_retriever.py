@@ -105,6 +105,12 @@ def _newsapi_start_cooldown() -> None:
         _newsapi_blocked_until = time.time() + _NEWSAPI_COOLDOWN_S
 
 
+def is_claim_mode(text: str) -> bool:
+    """Whether the input is a short claim (decided on evidence) rather than an article."""
+    from paper_trail_core.nlp.claim_mode import is_claim_text
+    return is_claim_text(text)
+
+
 def newsapi_status() -> dict[str, Any]:
     """Introspection for diagnostics / the /health endpoint."""
     with _newsapi_lock:
@@ -291,7 +297,88 @@ def is_newsapi_reachable(claim: str, window_days: int = NEWSAPI_WINDOW_DAYS) -> 
     return max(years) >= cutoff
 
 
-def build_queries(claim: str) -> list[tuple[str, str]]:
+# A Wikipedia page whose title appears in the claim is about the claim's subject
+# even when the claim gets a detail wrong ("The Gateway of India in Delhi ..."
+# still matches the page "Gateway of India"), and that wrong detail is exactly
+# what lowers the claim/page cosine below the usual gate. So in claim mode such a
+# page is admitted at a lower cosine and treated as on-topic.
+ANCHOR_MIN_COS = 0.30
+ANCHOR_RELEVANCE = 0.70
+MAX_SUBJECT_QUERIES = 3
+
+_RE_SUBJECT = re.compile(
+    r"\b[A-Z][A-Za-z'’\-]+(?:\s+(?:(?:of|de|la|le|the|and)\s+)?[A-Z][A-Za-z'’\-]+)*"
+)
+_SUBJECT_SKIP = {"the", "this", "that", "these", "those", "there", "his", "her", "their",
+                 "its", "our", "your", "some", "many", "most", "all", "one", "two"}
+
+
+def _subject_entities(claim: str) -> list[str]:
+    """Named things in the claim, in the order they appear."""
+    out: list[str] = []
+    for m in _RE_SUBJECT.finditer(claim):
+        words = m.group(0).split()
+        while words and words[0].lower() in _SUBJECT_SKIP:
+            words = words[1:]
+        while words and words[-1].lower() in ("of", "de", "la", "le", "the", "and"):
+            words = words[:-1]
+        phrase = " ".join(words)
+        if len(phrase) >= 3 and phrase.lower() not in {p.lower() for p in out}:
+            out.append(phrase)
+    return out
+
+
+def _norm_title(s: str) -> str:
+    s = re.sub(r"\([^)]*\)", " ", s or "")
+    return " ".join(re.sub(r"[^a-z0-9 ]", " ", s.lower()).split())
+
+
+def _title_parts(candidate: dict[str, Any]) -> tuple[str, str]:
+    """(normalised title, normalised qualifier) -- 'Gateway of India (film)' -> ('gateway of india', 'film')."""
+    raw = (candidate.get("text") or "").split(":", 1)[0]
+    qualifier = " ".join(re.findall(r"\(([^)]*)\)", raw))
+    return _norm_title(raw), _norm_title(qualifier) if qualifier else ""
+
+
+def _title_anchored(candidate: dict[str, Any], claim: str) -> bool:
+    """
+    Whether a Wikipedia candidate's title is a whole phrase inside the claim.
+
+    A page with a qualifier -- "Gateway of India (film)" -- is about something
+    else that merely shares the name, so it only counts if the qualifier is also
+    in the claim; disambiguation pages never do.
+    """
+    if candidate.get("provider") != "wikipedia":
+        return False
+    title, qualifier = _title_parts(candidate)
+    if len(title) < 4:
+        return False
+    claim_norm = f" {_norm_title(claim)} "
+    if qualifier and (qualifier == "disambiguation" or f" {qualifier} " not in claim_norm):
+        return False
+    return f" {title} " in claim_norm
+
+
+def _subject_rank(candidate: dict[str, Any], claim: str) -> int:
+    """
+    Which named thing in the claim a page is about: 0 for the first one named
+    (usually the subject), 1 for the second (usually where it is), and so on.
+    Pages that match no single entity rank last.
+    """
+    title = _norm_title((candidate.get("text") or "").split(":", 1)[0])
+    for rank, entity in enumerate(_subject_entities(claim)):
+        # Whole-phrase containment, so the page "Nile" is the page for "River Nile".
+        if f" {title} " in f" {_norm_title(entity)} ":
+            return rank
+    return 99
+
+
+def _is_disambiguation(candidate: dict[str, Any]) -> bool:
+    text = (candidate.get("text") or "")[:300].lower()
+    return "may refer to" in text or "(disambiguation)" in text.split(":", 1)[0]
+
+
+def build_queries(claim: str, claim_mode: bool = False) -> list[tuple[str, str]]:
     """
     Build (provider, query) pairs for a claim.
 
@@ -329,6 +416,13 @@ def build_queries(claim: str) -> list[tuple[str, str]]:
     wiki_terms = (anchors[:1] or []) + keywords[:3]
     if wiki_terms:
         queries.append(("wikipedia", " ".join(dict.fromkeys(wiki_terms))[:120]))
+
+    # Short claims are mostly "X is/was/in Y": looking each named thing up on its
+    # own finds the page about X, which the blended query above often misses
+    # (it favours the rarest words, so "Chennai" loses to "Coromandel").
+    if claim_mode:
+        for entity in _subject_entities(claim)[:MAX_SUBJECT_QUERIES]:
+            queries.append(("wikipedia", entity[:120]))
 
     # Deduplicate while preserving order.
     out: list[tuple[str, str]] = []
@@ -532,7 +626,8 @@ def _search_cached(provider: str, query: str) -> tuple[list[dict[str, Any]], str
 
 # ── Relevance gating ──────────────────────────────────────────────────────────
 
-def gate_by_relevance(claim: str, candidates: list[dict], min_cos: float = _REL_MIN) -> list[dict]:
+def gate_by_relevance(claim: str, candidates: list[dict], min_cos: float = _REL_MIN,
+                      claim_mode: bool = False) -> list[dict]:
     """
     Keep only candidates that semantically address the claim.
 
@@ -557,7 +652,16 @@ def gate_by_relevance(claim: str, candidates: list[dict], min_cos: float = _REL_
     kept = []
     for cand, sim in zip(candidates, sims):
         score = float(sim)
-        if score >= min_cos:
+        if claim_mode and _is_disambiguation(cand):
+            continue                    # "Mughal may refer to:" is not evidence
+        if claim_mode:
+            cand["claim_mode"] = True
+        if claim_mode and score >= ANCHOR_MIN_COS and _title_anchored(cand, claim):
+            cand["relevance"] = round(max(score, ANCHOR_RELEVANCE), 4)
+            cand["anchored"] = True
+            cand["subject_rank"] = _subject_rank(cand, claim)
+            kept.append(cand)
+        elif score >= min_cos:
             cand["relevance"] = round(score, 4)
             kept.append(cand)
 
@@ -835,7 +939,8 @@ def regional_evidence(claim: str, location: dict[str, Any]) -> tuple[list[dict[s
 
 # ── Per-claim retrieval ───────────────────────────────────────────────────────
 
-def retrieve_for_claim(claim: str, idx: int, location: dict[str, Any] | None = None) -> dict[str, Any]:
+def retrieve_for_claim(claim: str, idx: int, location: dict[str, Any] | None = None,
+                       claim_mode: bool = False) -> dict[str, Any]:
     """
     Fetch, gate and package the evidence for a single claim.
 
@@ -849,7 +954,7 @@ def retrieve_for_claim(claim: str, idx: int, location: dict[str, Any] | None = N
     candidates: list[dict[str, Any]] = []
     statuses: list[str] = []
     cache_hits = 0
-    queries = build_queries(claim)
+    queries = build_queries(claim, claim_mode=claim_mode) if claim_mode else build_queries(claim)
 
     for provider, query in queries:
         # `build_queries` already resolved which news provider to use (if any),
@@ -869,7 +974,8 @@ def retrieve_for_claim(claim: str, idx: int, location: dict[str, Any] | None = N
         seen_urls.add(key)
         deduped.append(c)
 
-    snippets = gate_by_relevance(claim, deduped)
+    snippets = (gate_by_relevance(claim, deduped, claim_mode=True) if claim_mode
+                else gate_by_relevance(claim, deduped))
 
     if snippets:
         status = "ok"
@@ -929,13 +1035,19 @@ def retrieve_evidence_node(state: PipelineState) -> dict:
     # Results are reassembled by index, never by completion order — otherwise
     # the same article could produce differently-ordered evidence run to run.
     locations = state.get("claim_locations") or []
+    claim_mode = is_claim_mode(state.get("article_text", ""))
 
     def _fetch(p):
         idx, claim = p
         loc = locations[idx] if idx < len(locations) else None
-        # Called without `location` when there is none, so claims the locator
-        # found nothing for take the original two-argument path untouched.
-        return retrieve_for_claim(claim, idx, location=loc) if loc else retrieve_for_claim(claim, idx)
+        # Optional arguments are passed only when they apply, so claims with
+        # neither a location nor claim mode take the original two-argument path.
+        kwargs: dict[str, Any] = {}
+        if loc:
+            kwargs["location"] = loc
+        if claim_mode:
+            kwargs["claim_mode"] = True
+        return retrieve_for_claim(claim, idx, **kwargs)
 
     with ThreadPoolExecutor(max_workers=max(1, _WORKERS)) as pool:
         evidence = list(pool.map(_fetch, list(enumerate(budget))))
