@@ -208,6 +208,16 @@ street or landmark up to a country — and the evidence stage then searches
 regional news for that place *in addition to* the usual global sources. See
 [docs/VERIFICATION_PIPELINE.md](docs/VERIFICATION_PIPELINE.md#stage-1b--locating-claims-region-aware).
 
+**Claim mode.** One or two sentences (up to 300 characters) are treated as a
+*claim* rather than an article: the verdict is decided on evidence alone
+(supported → `likely_real`, refuted → `likely_fake`, otherwise `uncertain`),
+because the style classifier and fusion model were fitted on whole articles and
+are unreliable on a single sentence. Compound claims are split, each named
+subject is looked up directly, and only a page about the claim's own subject may
+refute it. Longer text takes the unchanged article path; `CLAIM_MODE=false`
+disables this. Measured results and their limits are in
+[docs/VERIFICATION_PIPELINE.md](docs/VERIFICATION_PIPELINE.md#claim-mode--one-or-two-sentences).
+
 **Submission is asynchronous.** `POST /articles/submit` returns **202** with
 `status="processing"`; poll `GET /articles/{id}` until `completed` or `failed`.
 

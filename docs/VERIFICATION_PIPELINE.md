@@ -169,6 +169,85 @@ demo. Set `REGION_AWARE=false` to switch the whole feature off.
 
 ---
 
+## Claim mode — one or two sentences
+
+Everything above was built for **articles**. A person who types a single
+sentence is asking a different question, and the article machinery gets it
+wrong: the style classifier and the learned fusion were fitted on whole
+articles, so on one sentence the classifier is out of distribution (it says
+"real" at 0.99 about plainly false sentences) and the fusion follows it. On 40
+fresh single claims the article path committed to a verdict with **21%
+accuracy**, worse than guessing.
+
+So an input of at most `CLAIM_MODE_MAX_CHARS` (300) characters **and**
+`CLAIM_MODE_MAX_SENTENCES` (2) sentences is handled in *claim mode*. Anything
+longer takes the article path, unchanged (`CLAIM_MODE=false` turns claim mode
+off). One definition of "is this a claim?" lives in `nlp/claim_mode.py`.
+
+| | article path | claim mode |
+|---|---|---|
+| deciding signal | style classifier + evidence, learned fusion | **evidence only**; the classifier is reported, not used |
+| supported (entailment mass ≥ `CLAIM_ENTAIL_MIN`, 0.45) | — | `likely_real` |
+| refuted (contradiction mass ≥ `CLAIM_CONTRADICT_MIN`, 0.5) and none supported | — | `likely_fake` |
+| inconclusive, mixed, or no evidence | `uncertain` | `uncertain` — never `likely_fake` |
+
+What else is different in claim mode:
+
+- **Compound claims are split.** "X is A **and** is B" is checked as "X is A"
+  and "X is B" (`split_compound`), because one evidence sentence rarely states
+  both halves. Ambiguous sentences are left alone.
+- **Each named subject is looked up on its own** ("Chennai", "Gateway of
+  India", "Delhi"), not just one blended query that favours the rarest word.
+- **A Wikipedia page titled in the claim counts as on-topic** even when the
+  claim gets a detail wrong, because that wrong detail is exactly what lowers
+  the claim/page similarity below the usual gate. Pages with a qualifier
+  ("Gateway of India *(film)*") and disambiguation pages do not qualify.
+- **Only a page about the claim's own subject may refute it** (or a
+  near-paraphrase of the claim). A neighbouring page — the Blue Nile for a claim
+  about the Nile, Agra Fort for one about the Red Fort — holds true facts about
+  something else, and an NLI model reads that as contradiction. Neighbouring
+  pages can still *support*.
+- **Very short claims are accepted** (≥ `CLAIM_MODE_MIN_CHARS`, 10) and short
+  plain-ASCII text is no longer rejected as an "unsupported language"
+  (`langdetect` labelled a 48-character English sentence Catalan at 0.99999).
+
+### Measured
+
+Hand-written true/false claims about landmarks, places and facts (half true,
+half false by swapping one detail), Wikipedia as the main evidence. The "tuned"
+sets were used while building claim mode; the last set was written beforehand
+and looked at once.
+
+| set | path | committed | accuracy when committed | strict accuracy¹ |
+|---|---|---|---|---|
+| 40 claims, written before tuning | article path | 70% | **21%** | 15% |
+| same, after tuning | claim mode | 72% | **100%** | 72% |
+| 24 regional claims (tuned on) | article path | 67% | 38% | 25% |
+| same, after tuning | claim mode | 62% | 100% | 62% |
+| **40 fresh claims, never tuned on** | article path | 75% | **30%** | 22% |
+| same | claim mode | 92% | **97%** (1 wrong) | 90% |
+| golden, 30 articles | article path = claim mode (unchanged) | 57% | 76% | 43% |
+
+¹ correct ÷ all, counting `uncertain` as not correct.
+
+Read these with care:
+
+- The claims are **entity–attribute facts** ("X is in Y", "X was built in
+  1889"), which is what Wikipedia answers well. They say nothing about
+  fabricated events, quotes, statistics, breaking news, or satire, where
+  evidence is thin or absent; there the right answer is mostly `uncertain`.
+- The sets are small (24–40 claims). 97% on 37 committed verdicts is a long way
+  from a population estimate, and "towards 100%" is a statement about this kind
+  of claim, not about misinformation in general.
+- The remaining error mode is NLI misreading a true statement as contradicted
+  (e.g. a true Hampi/Vijayanagara claim at 0.85). The conservative rule — only
+  subject pages may refute — removed most of it but not all.
+- Region-aware search made **no difference** on these claims (identical results
+  with it on or off): they are encyclopedic, and regional headlines are not what
+  decides them. Its value is for local news claims, which are not measured here.
+
+---
+
 ## Stage 2 — Evidence retrieval
 
 `paper_trail_core/agents/evidence_retriever.py`, `sources.py`, `evidence_cache.py`
