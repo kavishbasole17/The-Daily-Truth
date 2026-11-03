@@ -1,0 +1,11 @@
+# Usage: TORCH_INDEX=https://download.pytorch.org/whl/cu121 \
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+services:
+  backend:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

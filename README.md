@@ -113,6 +113,21 @@ cd frontend && npm install && npm run dev
 
 ---
 
+## Run with Docker
+
+Needs Docker with Compose. Runs the API (`:8000`) and the Next.js UI (`:3000`).
+
+```bash
+cp .env.example .env        # then fill in API keys and JWT_SECRET_KEY
+docker compose up --build
+```
+
+- First start downloads the NLI/embedding models from Hugging Face (cached in a volume).
+- The SQLite DB, evidence cache and model cache persist in named volumes.
+- The browser calls the API, so if the API is not at `http://localhost:8000`, set
+  `NEXT_PUBLIC_API_URL` in `.env` before building.
+- NVIDIA GPU: `TORCH_INDEX=https://download.pytorch.org/whl/cu121 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build`
+
 ## API endpoints
 
 ### Model prediction (unchanged)

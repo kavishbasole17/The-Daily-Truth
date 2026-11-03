@@ -1,0 +1,16 @@
+.git
+.idea
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.env
+*.db
+dataset
+cache
+results
+notebooks
+creatives
+*.pdf
+frontend
+catboost_info
