@@ -9,14 +9,14 @@ WORKDIR /app
 # CPU torch first so requirements.txt doesn't pull the multi-GB CUDA wheel.
 # The GPU override (docker-compose.gpu.yml) rebuilds with TORCH_INDEX=cu121.
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
-RUN pip install --no-cache-dir torch --index-url ${TORCH_INDEX}
+RUN pip install --no-cache-dir --default-timeout=300 --retries=10 torch --index-url ${TORCH_INDEX}
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --default-timeout=300 --retries=10 -r requirements.txt
 
 COPY . .
 
-RUN useradd -m app && mkdir -p /data /app/cache && chown -R app /data /app/cache
+RUN useradd -m app && mkdir -p /data /app/cache /home/app/.cache/huggingface && chown -R app /data /app/cache /home/app/.cache
 USER app
 
 ENV HF_HOME=/home/app/.cache/huggingface \
