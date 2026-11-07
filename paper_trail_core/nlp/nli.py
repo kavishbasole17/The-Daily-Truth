@@ -112,10 +112,15 @@ def get_nli():
         if _bundle is not None:
             return _bundle
 
+        from paper_trail_core.nlp.openmp import load_before_torch
+        load_before_torch()         # see openmp.py: torch first segfaults XGBoost/LightGBM
         import torch
         from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
         torch.manual_seed(0)
+        # Multi-threaded torch deadlocks once XGBoost/LightGBM/TF share the
+        # process (conflicting OpenMP runtimes); one thread is stable.
+        torch.set_num_threads(int(os.environ.get("TORCH_NUM_THREADS", "1")))
         device = _resolve_device()
         log.info("nli: loading %s on %s", _MODEL_NAME, device)
 
@@ -150,9 +155,9 @@ def infer_batch(premises: list[str], hypotheses: list[str]) -> list[NLIResult]:
     if len(premises) != len(hypotheses):
         raise ValueError(f"premise/hypothesis length mismatch: {len(premises)} vs {len(hypotheses)}")
 
+    tokenizer, model, idx, device = get_nli()   # first: it fixes the OpenMP load order
     import torch
 
-    tokenizer, model, idx, device = get_nli()
     i_ent, i_neu, i_con = idx["entailment"], idx["neutral"], idx["contradiction"]
 
     premises = [p[:MAX_PREMISE_CHARS] for p in premises]

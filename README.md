@@ -104,6 +104,18 @@ uvicorn api.main:app --reload
 # → http://localhost:8000/docs  (Swagger UI)
 ```
 
+**macOS, faster:** torch and XGBoost/LightGBM each bring their own OpenMP
+runtime. The code makes them coexist, but only with torch on one thread (see
+`paper_trail_core/nlp/openmp.py`). Starting the API with a single shared runtime
+lets torch use more threads, about 40% faster per article:
+
+```bash
+DYLD_LIBRARY_PATH=/opt/homebrew/opt/libomp/lib TORCH_NUM_THREADS=8 uvicorn api.main:app --reload
+```
+
+Needs `brew install libomp`. Don't raise `TORCH_NUM_THREADS` without
+`DYLD_LIBRARY_PATH`: the process will segfault.
+
 ### 5. Start the frontend
 
 ```bash
