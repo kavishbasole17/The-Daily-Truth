@@ -68,6 +68,38 @@ _REFERENCE = {
 
 TRUST: dict[str, float] = {**_WIRE, **_MAJOR, **_INDIA, **_REFERENCE}
 
+# Fact-checking organisations (IFCN signatories). Used only to weigh fact-checks
+# in the origin trail, and kept out of TRUST on purpose: adding them there would
+# change evidence weights, and so verdicts, for any snippet from these sites.
+FACT_CHECKERS: dict[str, float] = {
+    "altnews.in": 0.9, "boomlive.in": 0.9, "factly.in": 0.88,
+    "factchecker.in": 0.85, "newschecker.in": 0.85, "vishvasnews.com": 0.85,
+    "thequint.com": 0.8, "newsmeter.in": 0.8, "digiteye.in": 0.8,
+    "factcheck.pib.gov.in": 0.9, "factcheck.afp.com": 0.95,
+    "fullfact.org": 0.9, "politifact.com": 0.9, "factcheck.org": 0.9,
+    "snopes.com": 0.85, "leadstories.com": 0.8,
+}
+
+
+def _fact_checker_key(url_or_name: str):
+    domain = domain_of(url_or_name)
+    parts = domain.split(".") if domain else []
+    for i in range(max(len(parts) - 1, 0)):
+        parent = ".".join(parts[i:])
+        if parent in FACT_CHECKERS:
+            return parent
+    return None
+
+
+def is_fact_checker(url_or_name: str) -> bool:
+    return _fact_checker_key(url_or_name) is not None
+
+
+def fact_checker_trust(url_or_name: str) -> float:
+    """Trust for a fact-check publisher; falls back to the ordinary source trust."""
+    key = _fact_checker_key(url_or_name)
+    return FACT_CHECKERS[key] if key else trust_for(url_or_name)
+
 DEFAULT_TRUST = 0.5
 # An unlisted Indian domain (.in / .co.in) is still more relevant to an Indian
 # reader than an unlisted foreign one, so it starts a little above the default.

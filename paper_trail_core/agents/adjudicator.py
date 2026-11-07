@@ -64,6 +64,33 @@ def _verdict_from_score(p_real: float, low: float, high: float) -> tuple[str, fl
     return "uncertain", round(max(p_real, 1.0 - p_real), 4)
 
 
+_ORIGIN_KIND = {"repeats": "repeats claim", "debunks": "contradicts claim",
+                "mentions": "mentions claim"}
+
+
+def _origin_lines(origin: dict) -> list[str]:
+    """ORIGIN TRAIL block for one claim; see paper_trail_core/agents/origin_tracer.py."""
+    lines = ["          ORIGIN TRAIL (earliest source found, not proof of origin)"]
+    if origin.get("claimant"):
+        when = f" on {origin['claim_date']}" if origin.get("claim_date") else ""
+        per = f" (per {origin['claimant_source']} fact-check)" if origin.get("claimant_source") else ""
+        lines.append(f"            claimed by {origin['claimant'][:60]}{when}{per}")
+    timeline = origin.get("timeline") or []
+    if not timeline:
+        lines.append("            no source found repeating or checking this claim")
+    for e in timeline:
+        date = e.get("date") or "undated   "
+        what = (f"FACT-CHECK: {e.get('label') or 'rated'}" if e.get("kind") == "fact_check"
+                else _ORIGIN_KIND.get(e.get("kind"), e.get("kind", "")))
+        if e.get("found_by") == "wider_search":
+            what += " (search)"
+        lines.append(
+            f"            {date}  {(e.get('domain') or '?')[:28].ljust(28)} "
+            f"{what[:30].ljust(30)} trust {e.get('trust', 0.5):.2f}"
+        )
+    return lines
+
+
 def _build_trace(
     features: dict[str, float],
     p_real: float,
@@ -119,6 +146,8 @@ def _build_trace(
                 f"          support={cv.get('support', 0.0):+.2f} "
                 f"relevance={cv.get('top_relevance', 0.0):.2f} via {src[:70]}"
             )
+            if cv.get("origin"):
+                lines += _origin_lines(cv["origin"])
 
     trace = "\n".join(lines)
     return trace + format_degradations(degradations)

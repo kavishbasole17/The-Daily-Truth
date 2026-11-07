@@ -53,6 +53,17 @@ def _no_live_geocoding(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _no_wider_origin_search(monkeypatch):
+    """
+    Keep the origin tracer's wider search (Google News) off the network. Tests
+    that exercise it stub the search explicitly.
+    """
+    from config import settings
+
+    monkeypatch.setattr(settings, "ORIGIN_WIDE_SEARCH", False, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _article_path_by_default(monkeypatch):
     """
     Most tests exercise the article path (style classifier + learned fusion), and

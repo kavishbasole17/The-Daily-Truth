@@ -15,6 +15,8 @@ Graph:
                             ↓
                        verify_claims    ← NLI per (evidence sentence, claim) pair
                             ↓
+                       trace_origin     ← fact-checks + dated trail for unsupported claims (report-only)
+                            ↓
                        run_ensemble     ← stacking ensemble P(real)
                             ↓
                        adjudicate       ← calibrated fusion → verdict or abstention
@@ -66,6 +68,7 @@ from paper_trail_core.agents.claim_extractor import extract_claims_node
 from paper_trail_core.agents.evidence_retriever import retrieve_evidence_node
 from paper_trail_core.agents.locator import locate_node
 from paper_trail_core.agents.ocr_agent import ocr_node
+from paper_trail_core.agents.origin_tracer import trace_origin_node
 from paper_trail_core.agents.state import ClaimVerdict, PipelineState
 from paper_trail_core.agents.stylistic_ensemble_agent import run_ensemble_node
 from paper_trail_core.agents.translation_agent import translate_node
@@ -162,6 +165,11 @@ def _fallback_verify(state: PipelineState) -> dict:
     }
 
 
+def _fallback_origin(_state: PipelineState) -> dict:
+    # Leaves claim_verdicts as the verifier wrote them: no trail, same verdict.
+    return {}
+
+
 def _fallback_ensemble(_state: PipelineState) -> dict:
     return {"ensemble_score": 0.5}
 
@@ -255,6 +263,8 @@ def _build_graph() -> StateGraph:
                with_stage_guard(retrieve_evidence_node, "evidence_retriever", _fallback_evidence))
     g.add_node("verify_claims",
                with_stage_guard(verify_claims_node, "verifier", _fallback_verify))
+    g.add_node("trace_origin",
+               with_stage_guard(trace_origin_node, "origin_tracer", _fallback_origin))
     g.add_node("run_ensemble",
                with_stage_guard(run_ensemble_node, "ensemble", _fallback_ensemble))
     g.add_node("adjudicate",
@@ -273,7 +283,8 @@ def _build_graph() -> StateGraph:
     g.add_edge("extract_claims",    "locate")
     g.add_edge("locate",            "retrieve_evidence")
     g.add_edge("retrieve_evidence", "verify_claims")
-    g.add_edge("verify_claims",     "run_ensemble")
+    g.add_edge("verify_claims",     "trace_origin")
+    g.add_edge("trace_origin",      "run_ensemble")
     g.add_edge("run_ensemble",      "adjudicate")
     g.add_edge("adjudicate",        END)
 

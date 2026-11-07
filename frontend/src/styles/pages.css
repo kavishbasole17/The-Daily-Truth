@@ -836,6 +836,113 @@
     line-height:1.5;
 }
 
+/* Origin trail: who made the claim and where it was seen, oldest first. */
+.origin-trail{
+    margin-top:14px;
+    padding-top:12px;
+    border-top:1px dashed var(--border);
+    font-size:.88rem;
+}
+
+.origin-trail-title{
+    color:var(--text);
+    font-weight:600;
+    margin-bottom:8px;
+}
+
+.origin-trail-title .muted{
+    font-weight:400;
+}
+
+.origin-claimant{
+    margin:0 0 8px;
+    color:var(--text);
+    line-height:1.5;
+}
+
+.origin-timeline{
+    list-style:none;
+    margin:0;
+    padding:0 0 0 14px;
+    border-left:2px solid var(--border);
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+}
+
+.origin-entry{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:baseline;
+    gap:4px 10px;
+    position:relative;
+    line-height:1.5;
+}
+
+.origin-entry::before{
+    content:"";
+    position:absolute;
+    left:-19px;
+    top:.55em;
+    width:8px;
+    height:8px;
+    border-radius:50%;
+    background:var(--muted);
+}
+
+.origin-date{
+    color:var(--muted);
+    font-variant-numeric:tabular-nums;
+    min-width:6.5em;
+}
+
+.origin-domain{
+    color:var(--text);
+    font-weight:600;
+    overflow-wrap:anywhere;
+}
+
+a.origin-domain:hover{
+    text-decoration:underline;
+}
+
+.origin-chip{
+    display:inline-block;
+    padding:1px 7px;
+    border-radius:3px;
+    font-size:.75rem;
+    font-weight:600;
+    border:1px solid var(--border);
+    color:var(--text);
+}
+
+.origin-chip-repeats{
+    background:rgba(225,6,0,.12);
+    border-color:rgba(225,6,0,.35);
+}
+
+.origin-chip-debunks{
+    background:rgba(34,197,94,.14);
+    border-color:rgba(34,197,94,.35);
+}
+
+.origin-chip-earliest{
+    background:rgba(234,179,8,.14);
+    border-color:rgba(234,179,8,.4);
+}
+
+.origin-trust{
+    font-size:.8rem;
+}
+
+@media (max-width:600px){
+    .origin-date{
+        flex-basis:100%;
+        min-width:0;
+        font-size:.8rem;
+    }
+}
+
 .reasoning-trace{
     margin-top:24px;
 }

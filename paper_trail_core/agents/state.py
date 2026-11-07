@@ -42,6 +42,13 @@ class ClaimVerdict(TypedDict, total=False):
     corroborating_sources: list[str]
     detail_mismatch: bool           # corroborated, but the claim's figures differ from the reports
     status: str                     # ok | no_hits | no_relevant | rate_limited | error
+    # Parallel to evidence_snippets: {url, domain, published_at, provider,
+    # trust, stance (repeats | debunks | neutral), stance_score}.
+    evidence_meta: list[dict[str, Any]]
+    # Set by origin_tracer for claims the evidence did not support: claimant,
+    # earliest source found, first debunk, dated timeline, matched fact-checks.
+    # Report-only; see paper_trail_core/agents/origin_tracer.py.
+    origin: Optional[dict[str, Any]]
 
 
 class PipelineState(TypedDict):
