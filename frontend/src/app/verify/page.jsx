@@ -17,6 +17,7 @@ import { AnimatePresence, motion } from "framer-motion";
 
 import Navbar from "@/components/Navbar";
 import ChatComposer from "@/components/ChatComposer";
+import PropagationGraph from "@/components/PropagationGraph";
 
 import { verifyArticle, verifyImage } from "@/services/api";
 
@@ -111,6 +112,7 @@ function OriginTrail({ origin }) {
                     )}
                 </p>
             )}
+            <PropagationGraph origin={origin} />
             {timeline.length === 0 ? (
                 <p className="muted">No source found repeating or checking this claim.</p>
             ) : (

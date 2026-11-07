@@ -935,6 +935,147 @@ a.origin-domain:hover{
     font-size:.8rem;
 }
 
+/* Propagation graph (components/PropagationGraph.jsx). The spread/check pair is
+   validated per theme (dataviz validate_palette.js: CVD ΔE ≥ 8, lightness band,
+   ≥3:1 contrast); the dark green is a step below --success, which fell outside
+   the dark lightness band. */
+:root,
+:root[data-theme="dark"]{
+    --pg-spread:#e10600;
+    --pg-check:#2aae5c;
+}
+
+:root[data-theme="light"]{
+    --pg-spread:#c1121f;
+    --pg-check:#16a34a;
+}
+
+.pg{
+    margin:4px 0 14px;
+    width:100%;
+}
+
+.pg-plot{
+    position:relative;
+}
+
+.pg-plot svg{
+    display:block;
+    overflow:visible;
+}
+
+.pg-lane,
+.pg-axis{
+    stroke:var(--border);
+    stroke-width:1;
+}
+
+.pg-lane-label{
+    fill:var(--muted);
+    font-size:12px;
+}
+
+.pg-tick{
+    fill:var(--muted);
+    font-size:11px;
+    font-variant-numeric:tabular-nums;
+}
+
+.pg-link{
+    fill:none;
+    stroke-width:1.25;
+    opacity:.45;
+}
+
+.pg-link-spread{ stroke:var(--pg-spread); }
+.pg-link-check{ stroke:var(--pg-check); }
+.pg-link-mention,
+.pg-link-origin{ stroke:var(--muted); }
+
+.pg-mark{
+    stroke:var(--card);
+    stroke-width:2;
+}
+
+.pg-mark-spread{ fill:var(--pg-spread); }
+.pg-mark-check{ fill:var(--pg-check); }
+
+.pg-mark-mention{
+    fill:var(--card);
+    stroke:var(--muted);
+}
+
+.pg-mark-origin{
+    fill:var(--card);
+    stroke:var(--text);
+}
+
+.pg-hit{
+    fill:transparent;
+    stroke:none;
+}
+
+.pg-node{
+    cursor:default;
+    outline:none;
+}
+
+.pg-node.is-active .pg-mark{
+    stroke:var(--text);
+}
+
+.pg-node:focus-visible .pg-hit{
+    stroke:var(--text);
+    stroke-width:1;
+}
+
+.pg-anchor-label{
+    fill:var(--text);
+    font-size:11px;
+    font-weight:600;
+}
+
+.pg-tip{
+    position:absolute;
+    transform:translate(-50%, -100%);
+    display:flex;
+    flex-direction:column;
+    gap:1px;
+    padding:6px 9px;
+    border-radius:6px;
+    background:var(--card);
+    border:1px solid var(--border);
+    box-shadow:0 4px 14px rgba(0,0,0,.18);
+    color:var(--text);
+    font-size:.8rem;
+    line-height:1.35;
+    white-space:nowrap;
+    pointer-events:none;
+    z-index:2;
+}
+
+.pg-caption{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    margin-top:2px;
+    font-size:.8rem;
+    line-height:1.45;
+}
+
+.pg-keys{
+    display:flex;
+    flex-wrap:wrap;
+    gap:4px 14px;
+    color:var(--text);
+}
+
+.pg-key{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+}
+
 @media (max-width:600px){
     .origin-date{
         flex-basis:100%;
