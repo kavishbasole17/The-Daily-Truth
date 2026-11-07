@@ -1,0 +1,76 @@
+{
+  "slice": "publishers",
+  "n": 30,
+  "errors": 0,
+  "fact_check_status": {
+    "disabled": 29,
+    "not_run": 1
+  },
+  "search_status": {
+    "ok": 29,
+    "not_run": 1
+  },
+  "wider_search_added_rows": {
+    "k": 12,
+    "n": 30,
+    "rate": 0.4,
+    "ci95": [
+      0.2459,
+      0.5768
+    ]
+  },
+  "called_supported": {
+    "k": 1,
+    "n": 30,
+    "rate": 0.0333,
+    "ci95": [
+      0.0059,
+      0.1667
+    ]
+  },
+  "traced": {
+    "k": 2,
+    "n": 30,
+    "rate": 0.0667,
+    "ci95": [
+      0.0185,
+      0.2132
+    ]
+  },
+  "publisher_found": {
+    "k": 1,
+    "n": 30,
+    "rate": 0.0333,
+    "ci95": [
+      0.0059,
+      0.1667
+    ]
+  },
+  "publisher_found_without_search": {
+    "k": 0,
+    "n": 30,
+    "rate": 0.0,
+    "ci95": [
+      0.0,
+      0.1135
+    ]
+  },
+  "earliest_correct": {
+    "k": 1,
+    "n": 30,
+    "rate": 0.0333,
+    "ci95": [
+      0.0059,
+      0.1667
+    ]
+  },
+  "earliest_precision": {
+    "k": 1,
+    "n": 2,
+    "rate": 0.5,
+    "ci95": [
+      0.0945,
+      0.9055
+    ]
+  }
+}

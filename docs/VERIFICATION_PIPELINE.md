@@ -374,6 +374,118 @@ Confidence is the calibrated probability of the class actually reported. (The
 old formula capped uncertain confidence at 0.1, so the UI displayed
 "10% Confidence" on every single uncertain verdict.)
 
+## Origin trail — where a claim came from
+
+`paper_trail_core/agents/origin_tracer.py`, runs between verification and the
+ensemble.
+
+For every claim the evidence does not support, the trail reports who made it
+and where it was seen, oldest first. It draws on two sources:
+
+- **Published fact-checks** (Google Fact Check Tools API). A fact-check's
+  `claimant` and `claimDate` ("WhatsApp forward, 27 Oct") are the best answer
+  available to "where did this start". A fact-check is used only if it reviews
+  the same claim (cosine ≥ `FACTCHECK_MIN_RELEVANCE`): naming the wrong
+  claimant is worse than naming none.
+- **The verifier's per-snippet provenance** (`evidence_meta`): each evidence
+  snippet's URL, date, trust and stance (`repeats` / `debunks` / `neutral`).
+  Stance ignores trust, so a low-trust site repeating the claim still counts as
+  repeating it.
+- **A wider search** (`ORIGIN_WIDE_SEARCH`). Evidence retrieval asks trusted
+  outlets, which is right for the verdict and wrong for finding where a false
+  claim started. This searches Google News RSS with no source allowlist (no
+  key; SerpAPI and Tavily join when keyed), using the claim and its most
+  distinctive words. A hit is kept only if it is close to the claim (cosine ≥
+  0.60) **and** repeats at least 40% of its distinctive words. A different
+  story about the same people ("Kim Jong-nam's death" for "Kim Jong Un dead")
+  passes the first test but not the second. Hits from fact-checkers are shown
+  as fact-checks; NLI reads their question headlines ("Malia Obama expelled
+  from Harvard?") as repeating the claim. Other hits need an NLI stance with
+  probability ≥ 0.5. Rows found this way are marked "(search)" in the trace and
+  "wider search" in the UI.
+
+  Without the NLI model, kept hits are shown as **"mentions claim"**, with no
+  stance guessed: word overlap would read "Fact check: X did not…" as a repeat
+  of X. Without the embedding model too, wording alone decides. And because a
+  verifier without NLI cannot see contradiction, its "supported" carries no
+  weight then: every claim gets a trail, and its evidence rows are also shown
+  as "mentions".
+
+  In practice Google News indexes fact-checks far more than hoax pages, so for
+  a claim that spread on WhatsApp it mostly finds the debunks, with dates.
+  "UNESCO declared Jana Gana Mana the best national anthem" turned up four, the
+  earliest from 2018, none of which trusted-outlet retrieval had found.
+
+It is **report-only**. No verdict, fusion feature or measured result reads it.
+The UI and trace label it "earliest source found, not proof of origin", because
+the trail only sees what the search providers index: messaging apps and most
+social posts are not indexed, and retrieval favours trusted outlets. An undated
+source is never called the earliest.
+
+Without `GOOGLE_FACTCHECK_API_KEY` the trail is built from retrieved evidence
+alone, and the trace notes that.
+
+### Evaluating it
+
+`scripts/evaluate_origin.py` scores the trail against ground truth already in
+`dataset/`:
+
+| slice | gold origin | headline metric |
+|---|---|---|
+| `claimants` | LIAR false / pants-fire claims; PolitiFact's `speaker` (half anonymous channels such as `facebook-posts`, `chain-email`; half people) | **claimant precision**: of the claimants named, how many are right |
+| `publishers` | FakeNewsNet `politifact_fake.csv`; the domain of each story's `news_url` (Wayback links unwrapped) | **publisher found**: the publishing site appears in the trail |
+
+```bash
+py scripts/evaluate_origin.py --slice claimants --n 30
+py scripts/evaluate_origin.py --slice publishers --n 30
+```
+
+Every rate is reported with a 95% Wilson interval, since samples this small
+carry wide error bars. Both slices are US claims from 2007–2018, so they say
+nothing about Indian or recent claims. `publishers` mostly measures how far
+Google News RSS reaches back, because NewsAPI only covers about a month.
+
+### Measured: `publishers`, 30 FakeNewsNet stories (2026-11-07)
+
+Live run, no fact-check key, `results/eval_origin_publishers.{md,csv}`:
+
+| metric | rate | 95% CI |
+|---|---|---|
+| publisher found anywhere in the trail | 1/30 (3%) | 1–17% |
+| … without the wider search | 0/30 | 0–11% |
+| earliest source is the publisher | 1/30 (3%) | 1–17% |
+| wider search added at least one row | 20/30 (67%) | 49–81% |
+
+The one hit is label noise: FakeNewsNet lists a cnn.com story as fake. In
+effect the trail **did not find a single fake-news publisher**. These 2016–18
+sites are mostly offline and absent from Google News, which indexes
+fact-checks rather than hoax pages.
+
+**Precision of the wider search's rows.** The first run showed most of its
+"contradicts claim" rows were other stories about the same people. Every row it
+produced for 60 stories was then labelled by hand, before any filter was chosen
+(`dataset/golden/wider_search_rows.jsonl`): *about* the claim, and *right*
+(about it, with the right stance). The filter above was chosen on stories
+31–60 and checked once on stories 1–30:
+
+| | tuning (38 rows) | held out (72 rows) |
+|---|---|---|
+| right, unfiltered (0.45 relevance only) | 26% | 18% (13/72) |
+| right, with the filter | 80% (12/15) | **50% (9/18)** |
+| about the claim, no NLI | 80% | 56% (10/18) |
+| about the claim, no models at all | 71% | 46% (11/24) |
+
+The filter also drops 8 of the 18 held-out rows that were about the claim:
+three correct NASA debunks repeat under 40% of the claim's exact words. What
+it lets through wrongly is the same subject in a different event (Maxine
+Waters' 2010 ethics charges for a 2017 "criminally charged" hoax), which shares
+the wording. One annotator labelled all rows. Rerunning `publishers` with the
+filter, the wider search added rows for 12 stories instead of 20; publisher
+found stays 1/30.
+
+`claimants` has not been run: without `GOOGLE_FACTCHECK_API_KEY` no claimant
+can be named, so its headline metric would be zero by construction.
+
 ---
 
 ## Running the evaluation
