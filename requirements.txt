@@ -62,6 +62,7 @@ sqlalchemy>=2.0.0
 # ── Authentication ────────────────────────────────────────────────────────────
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
+google-auth>=2.20.0       # verifies Google sign-in ID tokens (POST /auth/google)
 
 # ── Agentic pipeline ──────────────────────────────────────────────────────────
 langgraph>=0.1.0

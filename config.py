@@ -175,7 +175,20 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     JWT_SECRET_KEY: str = "dev-secret-key-CHANGE-IN-PRODUCTION"
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 60
+    # A day, so a signed-in user isn't bounced to the login page mid-session.
+    JWT_EXPIRE_MINUTES: int = 60 * 24
+
+    # Verification queries allowed without signing in, per client (IP).
+    # Follow-ups require an account. 0 = always require sign-in.
+    GUEST_QUERY_LIMIT: int = 1
+
+    # Google sign-in. The OAuth 2.0 Web client ID from Google Cloud Console.
+    # Unset = the "Continue with Google" button reports it isn't configured.
+    # The frontend needs the same value in NEXT_PUBLIC_GOOGLE_CLIENT_ID.
+    GOOGLE_CLIENT_ID: Optional[str] = None
+
+    # Seed a ready-to-use test account at startup (see README "Test account").
+    SEED_TEST_USER: bool = True
 
     # ------------------------------------------------------------------
     # Databases

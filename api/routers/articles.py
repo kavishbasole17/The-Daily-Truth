@@ -13,13 +13,14 @@ import os
 import tempfile
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from api.auth import get_current_user
+from api.auth import consume_guest_query, get_optional_user, guest_key
 from api.database import get_db
-from api.orm import Article, Verdict
+from api.orm import Article, Conversation, Verdict
 from paper_trail_core.agents.pipeline import run_verification_pipeline, run_verification_pipeline_image
 
 log = logging.getLogger(__name__)
@@ -60,6 +61,9 @@ class ArticleSubmitRequest(BaseModel):
     text: Optional[str] = Field(
         None, min_length=5, max_length=MAX_ARTICLE_TEXT_LEN,
         description="Raw article text",
+    )
+    conversation_id: Optional[int] = Field(
+        None, description="Signed-in only: append to this chat. Omit to start a new chat.",
     )
     url:  Optional[str] = Field(None, max_length=2048, description="Source URL (stored for reference)")
     region: Optional[str] = Field(
@@ -156,6 +160,8 @@ class ArticleOut(BaseModel):
     status:       str           # pending | processing | completed | failed
     submitted_at: str
     stage:        Optional[str] = None
+    kind:         Optional[str] = None          # text | image
+    conversation_id: Optional[int] = None       # None for a signed-out (guest) query
     verdict:      Optional[VerdictOut] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -189,8 +195,56 @@ def _build_article_out(article: Article) -> ArticleOut:
         status=article.status,
         submitted_at=article.submitted_at.isoformat(),
         stage=article.stage,
+        kind=article.kind,
+        conversation_id=article.conversation_id,
         verdict=verdict_out,
     )
+
+
+def _chat_title(text: str) -> str:
+    """A short sidebar title from the first line of the submission."""
+    first = " ".join((text or "").split())
+    return (first[:60].rstrip() + "…") if len(first) > 60 else (first or "Untitled check")
+
+
+def _assign_owner(
+    db: Session,
+    request: Request,
+    user: Optional[dict],
+    conversation_id: Optional[int],
+    title_text: str,
+) -> dict:
+    """
+    Decide who owns a new submission.
+
+    Signed-in: the article joins `conversation_id` (which must be theirs) or a
+    new conversation titled from the text. Signed-out: one of the guest's free
+    queries is spent (401 `guest_limit_reached` once they're gone) and the
+    article is unowned, tagged with the guest key so it can be claimed into a
+    chat after sign-in.
+    """
+    if user is None:
+        key = guest_key(request)
+        consume_guest_query(db, key)
+        return {"user_id": None, "conversation_id": None, "guest_key": key}
+
+    if conversation_id is not None:
+        conv = db.get(Conversation, conversation_id)
+        if conv is None or conv.user_id != user["id"]:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        conv.updated_at = func.now()
+    else:
+        conv = Conversation(user_id=user["id"], title=_chat_title(title_text))
+        db.add(conv)
+        db.flush()
+    return {"user_id": user["id"], "conversation_id": conv.id, "guest_key": None}
+
+
+def _can_read(article: Article, user: Optional[dict]) -> bool:
+    """Owned articles are private to their owner (admins see everything)."""
+    if article.user_id is None:
+        return True
+    return user is not None and (user["id"] == article.user_id or user["role"] == "admin")
 
 
 def _run_pipeline_job(article_id: int, text: str, url: Optional[str],
@@ -332,8 +386,9 @@ def _run_pipeline_image_job(article_id: int, image_path: str, url: Optional[str]
 def submit_article(
     req: ArticleSubmitRequest,
     background: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
-    _user: dict = Depends(get_current_user),
+    user: Optional[dict] = Depends(get_optional_user),
 ) -> ArticleOut:
     """
     Submit a news article for automated fake-news detection.
@@ -362,9 +417,14 @@ def submit_article(
     Articles the system will not commit to come back as `uncertain`, with the
     reason in `reasoning_trace` and `degradations`.
 
-    **Requires Bearer token** — obtain one at `POST /auth/token`.
+    **Auth:** signed-out callers get `GUEST_QUERY_LIMIT` free submissions
+    (default 1); after that a Bearer token is required (401 with
+    `detail.code = "guest_limit_reached"`). Signed-in submissions are saved to
+    a conversation — pass `conversation_id` to continue one.
     """
-    article = Article(text=req.text, url=req.url, status="processing", stage="queued")
+    owner = _assign_owner(db, request, user, req.conversation_id, req.text)
+    article = Article(text=req.text, url=req.url, status="processing", stage="queued",
+                      kind="text", **owner)
     db.add(article)
     db.commit()
     db.refresh(article)
@@ -383,11 +443,13 @@ def submit_article(
 )
 async def submit_article_image(
     background: BackgroundTasks,
+    request: Request,
     file: UploadFile = File(..., description="Photo or screenshot of the article"),
     url: Optional[str] = Form(None, max_length=2048),
     region: Optional[str] = Form(None, max_length=120),
+    conversation_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
-    _user: dict = Depends(get_current_user),
+    user: Optional[dict] = Depends(get_optional_user),
 ) -> ArticleOut:
     """
     Submit a photographed or screenshotted article image for verification.
@@ -403,7 +465,8 @@ async def submit_article_image(
     for a text submission — the recovered text appears in `text_preview` once
     processing completes.
 
-    **Requires Bearer token** — obtain one at `POST /auth/token`.
+    **Auth:** same guest allowance and conversation handling as
+    `POST /articles/submit`.
     """
     content_type = (file.content_type or "").lower()
     ext = _EXT_BY_CONTENT_TYPE.get(content_type)
@@ -428,13 +491,18 @@ async def submit_article_image(
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file upload.")
 
+    # Validate the upload before spending a guest query on it.
+    owner = _assign_owner(db, request, user, conversation_id,
+                          f"Image: {file.filename or 'pasted image'}")
+
     # A random server-side name (tempfile), not the client-supplied filename —
     # the filename never touches the filesystem path.
     fd, image_path = tempfile.mkstemp(prefix="paper_trail_upload_", suffix=ext)
     with os.fdopen(fd, "wb") as f:
         f.write(data)
 
-    article = Article(text="", url=url, status="processing", stage="queued")
+    article = Article(text="", url=url, status="processing", stage="queued",
+                      kind="image", **owner)
     db.add(article)
     db.commit()
     db.refresh(article)
@@ -454,13 +522,15 @@ async def submit_article_image(
 def get_article(
     article_id: int,
     db: Session = Depends(get_db),
+    user: Optional[dict] = Depends(get_optional_user),
 ) -> ArticleOut:
     """
     Retrieve a previously submitted article by its ID, including the full verdict
-    and reasoning trace.  No auth required.
+    and reasoning trace. Guest submissions are readable without auth; articles
+    saved to an account are visible only to that account (and admins).
     """
     article = db.get(Article, article_id)
-    if article is None:
+    if article is None or not _can_read(article, user):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Article {article_id} not found",

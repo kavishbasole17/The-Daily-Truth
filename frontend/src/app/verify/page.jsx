@@ -9,16 +9,34 @@
 // article is a "user" turn, and the verdict + evidence trail comes back as
 // an "assistant" turn, so multiple articles can be checked back-to-back in
 // one running thread.
+//
+// Signed out, one check is free; follow-ups need an account (SignInGate).
+// Signed in, every check is saved to a conversation, listed in the
+// "Previous chats" sidebar and reopenable via /verify?c=<id>.
 
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 
 import Navbar from "@/components/Navbar";
 import ChatComposer from "@/components/ChatComposer";
+import ChatHistorySidebar, { parseServerTime } from "@/components/ChatHistorySidebar";
+import { useAuth } from "@/context/AuthContext";
 
-import { verifyArticle, verifyImage } from "@/services/api";
+import {
+    claimGuestChecks,
+    deleteConversation,
+    errorMessage,
+    getConversation,
+    getGuestStatus,
+    isGuestLimitError,
+    listConversations,
+    pollVerification,
+    verifyArticle,
+    verifyImage,
+} from "@/services/api";
 
 import "@/styles/pages.css";
 import "@/styles/chat.css";
@@ -337,15 +355,112 @@ function AssistantBubble({ message }) {
     );
 }
 
+const GUEST_THREAD_KEY = "dt_guest_thread";
+
+function readGuestThread() {
+    try {
+        return JSON.parse(sessionStorage.getItem(GUEST_THREAD_KEY) || "null")?.articleIds || [];
+    } catch {
+        return [];
+    }
+}
+
+function rememberGuestArticle(id) {
+    try {
+        const ids = readGuestThread();
+        sessionStorage.setItem(GUEST_THREAD_KEY, JSON.stringify({ articleIds: [...ids, id] }));
+    } catch {
+        // storage unavailable — the check just won't carry over after sign-in
+    }
+}
+
+function forgetGuestThread() {
+    try {
+        sessionStorage.removeItem(GUEST_THREAD_KEY);
+    } catch {
+        // ignore
+    }
+}
+
+// A stored check (from /conversations/{id}) as the two chat bubbles it was.
+function turnToMessages(turn) {
+    const kind = turn.kind === "image" ? "image" : "text";
+    const submitted = parseServerTime(turn.submitted_at);
+    return [
+        {
+            id: `a${turn.id}-user`, role: "user", kind,
+            text: turn.text || turn.text_preview || "",
+            fileName: "Image submission",
+            expanded: false, timestamp: submitted,
+        },
+        {
+            id: `a${turn.id}-assistant`, articleId: turn.id, role: "assistant", kind,
+            status: turn.status === "completed" ? "done" : turn.status === "failed" ? "error" : "loading",
+            stage: turn.stage || "queued",
+            result: turn,
+            error: turn.status === "failed" ? "Verification failed for this check." : undefined,
+            timestamp: parseServerTime(turn.verdict?.created_at) || submitted,
+        },
+    ];
+}
+
+function SignInGate() {
+    return (
+        <div className="chat-composer">
+            <div className="chat-composer-inset">
+                <div className="chat-gate" role="status">
+                    <div className="chat-gate-text">
+                        <strong>You&rsquo;ve used your free check.</strong>
+                        <span>Sign in to ask follow-ups. Your first check will be saved to your chat history.</span>
+                    </div>
+                    <div className="chat-gate-actions">
+                        <Link href="/login?next=/verify&reason=limit" className="chat-gate-primary">Sign in</Link>
+                        <Link href="/login?next=/verify&mode=register&reason=limit" className="chat-gate-secondary">
+                            Create account
+                        </Link>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function VerifyPage() {
+    const { user, ready } = useAuth();
+
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState("");
     const [sending, setSending] = useState(false);
     const [attachError, setAttachError] = useState("");
     const [showJump, setShowJump] = useState(false);
+
+    const [conversationId, setConversationId] = useState(null);
+    const [conversations, setConversations] = useState([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [historyOpen, setHistoryOpen] = useState(false);
+    const [loadingChat, setLoadingChat] = useState(false);
+    const [guestRemaining, setGuestRemaining] = useState(null);
+
     const threadEndRef = useRef(null);
     const previewUrlsRef = useRef([]);
     const composerRef = useRef(null);
+    const conversationIdRef = useRef(null);
+    // Bumped whenever the visible chat changes, so a poll that finishes for a
+    // chat you've navigated away from doesn't write into the new one.
+    const viewTokenRef = useRef(0);
+
+    const setActiveConversation = useCallback((id) => {
+        conversationIdRef.current = id;
+        setConversationId(id);
+        const url = new URL(window.location.href);
+        url.searchParams.delete("history");
+        url.searchParams.delete("new");
+        if (id) url.searchParams.set("c", String(id));
+        else url.searchParams.delete("c");
+        window.history.replaceState(null, "", url.pathname + url.search);
+    }, []);
+
+    const gated = ready && !user && guestRemaining === 0;
 
     useEffect(() => {
         threadEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -372,6 +487,111 @@ export default function VerifyPage() {
         previewUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
     }, []);
 
+    const updateAssistant = useCallback((id, patch) => {
+        setMessages(prev => prev.map(m => (m.id === id ? { ...m, ...patch } : m)));
+    }, []);
+
+    const refreshConversations = useCallback(async () => {
+        setHistoryLoading(true);
+        try {
+            const { data } = await listConversations();
+            setConversations(data);
+        } catch {
+            // keep whatever list we had; the sidebar is a convenience
+        } finally {
+            setHistoryLoading(false);
+        }
+    }, []);
+
+    // Show a stored chat, resuming the poll for any check still running.
+    const showConversation = useCallback((detail) => {
+        const token = ++viewTokenRef.current;
+        setActiveConversation(detail.id);
+        const msgs = detail.turns.flatMap(turnToMessages);
+        setMessages(msgs);
+        msgs.filter(m => m.role === "assistant" && m.status === "loading").forEach(m => {
+            pollVerification(m.articleId, {
+                onStage: stage => viewTokenRef.current === token && updateAssistant(m.id, { stage }),
+            })
+                .then(data => viewTokenRef.current === token && updateAssistant(m.id, { status: "done", result: data }))
+                .catch(err => viewTokenRef.current === token &&
+                    updateAssistant(m.id, { status: "error", error: errorMessage(err, "Failed to verify.") }));
+        });
+    }, [setActiveConversation, updateAssistant]);
+
+    const openConversation = useCallback(async (id) => {
+        if (sending) return;
+        setHistoryOpen(false);
+        setAttachError("");
+        setLoadingChat(true);
+        try {
+            const { data } = await getConversation(id);
+            showConversation(data);
+        } catch (err) {
+            setAttachError(errorMessage(err, "Couldn't open that chat."));
+            if (err?.response?.status === 404) {
+                setActiveConversation(null);
+                refreshConversations();
+            }
+        } finally {
+            setLoadingChat(false);
+        }
+    }, [sending, showConversation, setActiveConversation, refreshConversations]);
+
+    const startNewConversation = useCallback(() => {
+        if (sending) return;
+        viewTokenRef.current++;
+        setActiveConversation(null);
+        setMessages([]);
+        setInput("");
+        setAttachError("");
+        setHistoryOpen(false);
+    }, [sending, setActiveConversation]);
+
+    // Once auth is known: signed out → ask how many free checks are left;
+    // signed in → load history, adopt the guest check made before signing in,
+    // and honour ?c= / ?history= / ?new= from the URL.
+    useEffect(() => {
+        if (!ready) return;
+        let cancelled = false;
+        const params = new URLSearchParams(window.location.search);
+
+        if (!user) {
+            // Signed out (or just signed out): drop any saved chat from view.
+            viewTokenRef.current++;
+            setConversations([]);
+            setActiveConversation(null);
+            setMessages(prev => (prev.some(m => m.role === "user" && !m.guest) ? [] : prev));
+            getGuestStatus()
+                .then(({ data }) => !cancelled && setGuestRemaining(data.remaining))
+                .catch(() => !cancelled && setGuestRemaining(null));
+            return () => { cancelled = true; };
+        }
+
+        setGuestRemaining(null);
+        if (params.get("history") === "1") setHistoryOpen(true);
+
+        (async () => {
+            const guestIds = readGuestThread();
+            if (guestIds.length) {
+                forgetGuestThread();
+                try {
+                    const { data } = await claimGuestChecks(guestIds);
+                    if (!cancelled) showConversation(data);
+                } catch {
+                    // claimed already, or from another network — nothing to carry over
+                }
+            } else if (params.get("new") === "1") {
+                startNewConversation();
+            } else if (params.get("c")) {
+                openConversation(Number(params.get("c")));
+            }
+            if (!cancelled) refreshConversations();
+        })();
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [ready, user?.id]);
+
     const jumpToLatest = () => {
         threadEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     };
@@ -382,49 +602,72 @@ export default function VerifyPage() {
         setMessages(prev => prev.map(m => (m.id === id ? { ...m, expanded: !m.expanded } : m)));
     };
 
-    const updateAssistant = (id, patch) => {
-        setMessages(prev => prev.map(m => (m.id === id ? { ...m, ...patch } : m)));
-    };
-
-    const handleSend = async () => {
-        const text = input.trim();
-        if (!text || sending) return;
-
+    // Shared by text and image submissions. Returns false when the server
+    // refused because the free signed-out check is already used.
+    const runCheck = async ({ userMsg, kind, submit, fallbackError }) => {
         const turnId = `${Date.now()}`;
         const userId = `${turnId}-user`;
         const assistantId = `${turnId}-assistant`;
-
         const timestamp = Date.now();
+        const signedIn = !!user;
+        const token = viewTokenRef.current;
+
         setAttachError("");
         setMessages(prev => [
             ...prev,
-            { id: userId, role: "user", kind: "text", text, expanded: false, timestamp },
-            { id: assistantId, role: "assistant", kind: "text", status: "loading", stage: "queued", timestamp },
+            { id: userId, role: "user", kind, expanded: false, timestamp, guest: !signedIn, ...userMsg },
+            { id: assistantId, role: "assistant", kind, status: "loading", stage: "queued", timestamp, guest: !signedIn },
         ]);
-        setInput("");
         setSending(true);
 
         try {
-            const data = await verifyArticle(text, {
+            const data = await submit({
+                conversationId: signedIn ? conversationIdRef.current : null,
                 onStage: stage => updateAssistant(assistantId, { stage }),
+                onSubmitted: article => {
+                    updateAssistant(assistantId, { articleId: article.id });
+                    if (!signedIn) {
+                        rememberGuestArticle(article.id);
+                        setGuestRemaining(r => (r == null ? r : Math.max(0, r - 1)));
+                    } else if (article.conversation_id && viewTokenRef.current === token) {
+                        if (!conversationIdRef.current) setActiveConversation(article.conversation_id);
+                        refreshConversations();
+                    }
+                },
             });
             updateAssistant(assistantId, { status: "done", result: data });
+            if (signedIn) refreshConversations();
+            return true;
         } catch (err) {
-            updateAssistant(assistantId, {
-                status: "error",
-                error:
-                    err?.response?.data?.detail ||
-                    err?.response?.data?.message ||
-                    err?.message ||
-                    "Failed to verify article.",
-            });
+            if (isGuestLimitError(err)) {
+                // Not a failed check — the free one is used. Undo the optimistic
+                // turn and show the sign-in prompt instead.
+                setMessages(prev => prev.filter(m => m.id !== userId && m.id !== assistantId));
+                setGuestRemaining(0);
+                return false;
+            }
+            updateAssistant(assistantId, { status: "error", error: errorMessage(err, fallbackError) });
+            return true;
         } finally {
             setSending(false);
         }
     };
 
+    const handleSend = async () => {
+        const text = input.trim();
+        if (!text || sending || gated) return;
+        setInput("");
+        const accepted = await runCheck({
+            userMsg: { text },
+            kind: "text",
+            submit: opts => verifyArticle(text, opts),
+            fallbackError: "Failed to verify article.",
+        });
+        if (!accepted) setInput(text);
+    };
+
     const handleImageSelect = async (file) => {
-        if (sending) return;
+        if (sending || gated) return;
 
         if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
             setAttachError("Unsupported image type. Use JPEG, PNG, WEBP, BMP or TIFF.");
@@ -434,56 +677,59 @@ export default function VerifyPage() {
             setAttachError(`Image exceeds the ${MAX_IMAGE_MB}MB limit.`);
             return;
         }
-        setAttachError("");
 
-        const turnId = `${Date.now()}`;
-        const userId = `${turnId}-user`;
-        const assistantId = `${turnId}-assistant`;
         const previewUrl = URL.createObjectURL(file);
         previewUrlsRef.current.push(previewUrl);
-        const timestamp = Date.now();
 
-        setMessages(prev => [
-            ...prev,
-            { id: userId, role: "user", kind: "image", previewUrl, fileName: file.name || "Pasted image", timestamp },
-            { id: assistantId, role: "assistant", kind: "image", status: "loading", stage: "queued", timestamp },
-        ]);
-        setSending(true);
+        await runCheck({
+            userMsg: { previewUrl, fileName: file.name || "Pasted image" },
+            kind: "image",
+            submit: opts => verifyImage(file, opts),
+            fallbackError: "Failed to verify image.",
+        });
+    };
 
+    const handleDeleteConversation = async (id) => {
         try {
-            const data = await verifyImage(file, {
-                onStage: stage => updateAssistant(assistantId, { stage }),
-            });
-            updateAssistant(assistantId, { status: "done", result: data });
+            await deleteConversation(id);
+            setConversations(prev => prev.filter(c => c.id !== id));
+            if (conversationIdRef.current === id) startNewConversation();
         } catch (err) {
-            updateAssistant(assistantId, {
-                status: "error",
-                error:
-                    err?.response?.data?.detail ||
-                    err?.response?.data?.message ||
-                    err?.message ||
-                    "Failed to verify image.",
-            });
-        } finally {
-            setSending(false);
+            setAttachError(errorMessage(err, "Couldn't delete that chat."));
         }
     };
 
-    const handleNewConversation = () => {
-        if (sending) return;
-        setMessages([]);
-        setInput("");
-        setAttachError("");
-    };
+    const activeTitle = conversations.find(c => c.id === conversationId)?.title;
 
     return (
         <>
             <Navbar />
 
-            <section className="chat-page">
+            <section className="chat-page has-history">
+                <ChatHistorySidebar
+                    user={user}
+                    conversations={conversations}
+                    loading={historyLoading}
+                    activeId={conversationId}
+                    open={historyOpen}
+                    busy={sending}
+                    onSelect={openConversation}
+                    onNew={startNewConversation}
+                    onDelete={handleDeleteConversation}
+                    onClose={() => setHistoryOpen(false)}
+                />
+
                 <div className="chat-shell">
                     <div className="chat-header">
                         <div className="chat-header-title">
+                            <button
+                                type="button" className="chat-history-toggle"
+                                onClick={() => setHistoryOpen(true)} aria-label="Show previous chats"
+                            >
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                                    <path d="M4 6h16M4 12h16M4 18h10" />
+                                </svg>
+                            </button>
                             <div className="chat-header-icon">
                                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M14 3v5a1 1 0 001 1h5" />
@@ -493,12 +739,12 @@ export default function VerifyPage() {
                             </div>
                             <div>
                                 <h1>Paper Trail</h1>
-                                <p>Evidence-grounded verification, claim by claim.</p>
+                                <p>{activeTitle || "Evidence-grounded verification, claim by claim."}</p>
                             </div>
                         </div>
 
                         {messages.length > 0 && (
-                            <button type="button" className="chat-new-btn" onClick={handleNewConversation}>
+                            <button type="button" className="chat-new-btn" onClick={startNewConversation} disabled={sending}>
                                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M12 5v14M5 12h14" />
                                 </svg>
@@ -507,7 +753,11 @@ export default function VerifyPage() {
                         )}
                     </div>
 
-                    {messages.length === 0 ? (
+                    {loadingChat ? (
+                        <div className="chat-welcome">
+                            <p className="muted">Opening chat…</p>
+                        </div>
+                    ) : messages.length === 0 ? (
                         <div className="chat-welcome">
                             <div className="chat-welcome-icon">
                                 <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -523,18 +773,27 @@ export default function VerifyPage() {
                                 trusted news outlets and reference sources, and shows you the
                                 receipts.
                             </p>
-                            <div className="chat-suggestions">
-                                {SUGGESTIONS.map(s => (
-                                    <button
-                                        type="button"
-                                        className="chat-suggestion"
-                                        key={s}
-                                        onClick={focusComposer}
-                                    >
-                                        {s}
-                                    </button>
-                                ))}
-                            </div>
+                            {ready && !user && guestRemaining > 0 && (
+                                <p className="chat-guest-note">
+                                    You can run {guestRemaining === 1 ? "one check" : `${guestRemaining} checks`} without
+                                    an account. <Link href="/login?next=/verify">Sign in</Link> to ask follow-ups and
+                                    keep your history.
+                                </p>
+                            )}
+                            {!gated && (
+                                <div className="chat-suggestions">
+                                    {SUGGESTIONS.map(s => (
+                                        <button
+                                            type="button"
+                                            className="chat-suggestion"
+                                            key={s}
+                                            onClick={focusComposer}
+                                        >
+                                            {s}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <div className="chat-thread">
@@ -564,15 +823,23 @@ export default function VerifyPage() {
 
                     {attachError && <div className="chat-error-inline chat-attach-error">{attachError}</div>}
 
-                    <ChatComposer
-                        ref={composerRef}
-                        value={input}
-                        onChange={setInput}
-                        onSend={handleSend}
-                        onImageSelect={handleImageSelect}
-                        disabled={sending}
-                        placeholder="Paste article content, or attach a photo of one..."
-                    />
+                    {gated ? (
+                        <SignInGate />
+                    ) : (
+                        <ChatComposer
+                            ref={composerRef}
+                            value={input}
+                            onChange={setInput}
+                            onSend={handleSend}
+                            onImageSelect={handleImageSelect}
+                            disabled={sending || loadingChat}
+                            placeholder={
+                                messages.length > 0
+                                    ? "Ask a follow-up, or paste another article..."
+                                    : "Paste article content, or attach a photo of one..."
+                            }
+                        />
+                    )}
                 </div>
 
                 {showJump && (

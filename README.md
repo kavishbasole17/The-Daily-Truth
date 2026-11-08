@@ -147,18 +147,39 @@ docker compose up --build
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/auth/token` | — | Get JWT bearer token |
-| POST | `/articles/submit` | ✓ | Run pipeline, persist verdict |
-| GET | `/articles/{id}` | — | Retrieve stored verdict |
+| POST | `/auth/token` | — | Sign in (username **or** email + password) → JWT |
+| POST | `/auth/register` | — | Create an account → JWT |
+| GET | `/auth/me` | ✓ | The signed-in user |
+| POST | `/auth/google` | — | Sign in with a Google ID token (needs `GOOGLE_CLIENT_ID`; 501 until set) |
+| GET | `/auth/guest` | — | Free signed-out checks remaining |
+| POST | `/articles/submit` | 1 free, then ✓ | Run pipeline, persist verdict (pass `conversation_id` to continue a chat) |
+| POST | `/articles/submit-image` | 1 free, then ✓ | OCR an image, then run the pipeline |
+| GET | `/articles/{id}` | owner | Retrieve stored verdict (guest checks are public by id) |
+| GET | `/conversations` | ✓ | Previous chats, most recent first |
+| GET / PATCH / DELETE | `/conversations/{id}` | ✓ | Open / rename / delete a chat |
+| POST | `/conversations/claim` | ✓ | Move this client's signed-out check into a new chat after sign-in |
 | GET | `/models/registry` | — | Registry for analytics dashboard |
 
-**Demo credentials:** `admin`/`admin123` or `analyst`/`analyst123` (both have the same access)
+### Accounts and the free check
+
+- **Test account:** `testuser` (or `test@dailytruth.app`) / `Test@1234` — seeded on startup
+  (`SEED_TEST_USER=true`). `admin`/`admin123` and `analyst`/`analyst123` are seeded too.
+- **One free check:** signed-out visitors can run `GUEST_QUERY_LIMIT` (default 1) checks on
+  Paper Trail, counted per client IP. After that the API answers 401 with
+  `detail.code = "guest_limit_reached"` and the UI shows a sign-in prompt. On sign-in the free
+  check is moved into the user's history so the thread continues.
+- **Previous chats:** every signed-in check belongs to a conversation, listed in the sidebar on
+  `/verify` and reopenable at `/verify?c=<id>`. Owned checks are private to their owner.
+- **Google sign-in (not configured yet):** create an OAuth 2.0 *Web* client in Google Cloud
+  Console, add `http://localhost:3000` to its authorised JavaScript origins, then set
+  `GOOGLE_CLIENT_ID=<id>` in `.env` and `NEXT_PUBLIC_GOOGLE_CLIENT_ID=<id>` in
+  `frontend/.env.local`, and `pip install google-auth`. Until then the button says it isn't set up.
 
 ```bash
 # Get a token
 curl -X POST http://localhost:8000/auth/token \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}'
+  -d '{"username":"testuser","password":"Test@1234"}'
 
 # Submit an article (MOCK_MODE=true — no API keys needed)
 curl -X POST http://localhost:8000/articles/submit \

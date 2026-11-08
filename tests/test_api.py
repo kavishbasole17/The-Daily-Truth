@@ -123,9 +123,146 @@ _MOCK_VERDICT = {
 }
 
 
-def test_submit_article_requires_auth(client):
-    resp = client.post("/articles/submit", json={"text": SAMPLE_ARTICLE})
-    assert resp.status_code == 401
+def _reset_guest_usage():
+    from api.database import SessionLocal
+    from api.orm import GuestUsage
+    db = SessionLocal()
+    try:
+        db.query(GuestUsage).delete()
+        db.commit()
+    finally:
+        db.close()
+
+
+def _uncertain_vr():
+    from paper_trail_core.agents.pipeline import VerdictResult
+    return VerdictResult(verdict="uncertain", confidence=0.0, claim_verdicts=[],
+                         ensemble_score=0.5, reasoning_trace="")
+
+
+def test_one_free_query_then_auth_required(client):
+    from config import settings
+    settings.GUEST_QUERY_LIMIT = 1
+    _reset_guest_usage()
+
+    assert client.get("/auth/guest").json()["remaining"] == 1
+    with patch("api.routers.articles.run_verification_pipeline", return_value=_uncertain_vr()):
+        first = client.post("/articles/submit", json={"text": SAMPLE_ARTICLE})
+        assert first.status_code == 202
+        assert first.json()["conversation_id"] is None
+        # the guest's own check is readable without a token
+        assert client.get(f"/articles/{first.json()['id']}").status_code == 200
+
+        second = client.post("/articles/submit", json={"text": SAMPLE_ARTICLE})
+    assert second.status_code == 401
+    assert second.json()["detail"]["code"] == "guest_limit_reached"
+    assert client.get("/auth/guest").json()["remaining"] == 0
+
+
+# ── Accounts + chat history ────────────────────────────────────────────────────
+
+def test_test_user_can_sign_in_by_username_or_email(client):
+    for ident in ("testuser", "test@dailytruth.app", "TestUser"):
+        resp = client.post("/auth/token", json={"username": ident, "password": "Test@1234"})
+        assert resp.status_code == 200, ident
+        assert resp.json()["user"]["username"] == "testuser"
+
+
+def test_register_then_me(client):
+    import uuid
+    name = f"newbie{uuid.uuid4().hex[:8]}"
+    resp = client.post("/auth/register", json={
+        "username": name, "email": f"{name}@example.com",
+        "password": "longenough1", "full_name": "New Bie",
+    })
+    assert resp.status_code == 201
+    token = resp.json()["access_token"]
+    me = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200 and me.json()["email"] == f"{name}@example.com"
+
+    dup = client.post("/auth/register", json={
+        "username": name, "email": "other@example.com", "password": "longenough1",
+    })
+    assert dup.status_code == 409
+    short = client.post("/auth/register", json={
+        "username": "shorty", "email": "s@example.com", "password": "short",
+    })
+    assert short.status_code == 422
+
+
+def test_google_sign_in_reports_not_configured(client):
+    from config import settings
+    settings.GOOGLE_CLIENT_ID = None
+    resp = client.post("/auth/google", json={"credential": "x"})
+    assert resp.status_code == 501
+
+
+def _signup(client, name):
+    import uuid
+    name = f"{name}{uuid.uuid4().hex[:8]}"   # unique even if the test DB survives a run
+    resp = client.post("/auth/register", json={
+        "username": name, "email": f"{name}@example.com", "password": "password123",
+    })
+    assert resp.status_code == 201
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
+
+
+def test_signed_in_checks_build_a_chat_history(client):
+    alice = _signup(client, "alice")
+    bob = _signup(client, "bob")
+
+    with patch("api.routers.articles.run_verification_pipeline", return_value=_uncertain_vr()):
+        first = client.post("/articles/submit", json={"text": SAMPLE_ARTICLE}, headers=alice)
+        conv_id = first.json()["conversation_id"]
+        assert conv_id is not None
+        follow = client.post("/articles/submit",
+                             json={"text": "A follow-up claim about the same story.",
+                                   "conversation_id": conv_id},
+                             headers=alice)
+        assert follow.json()["conversation_id"] == conv_id
+        # bob can't post into alice's chat
+        assert client.post("/articles/submit",
+                           json={"text": SAMPLE_ARTICLE, "conversation_id": conv_id},
+                           headers=bob).status_code == 404
+
+    chats = client.get("/conversations", headers=alice).json()
+    assert [c["id"] for c in chats] == [conv_id]
+    assert chats[0]["message_count"] == 2
+
+    detail = client.get(f"/conversations/{conv_id}", headers=alice).json()
+    assert [t["text"] for t in detail["turns"]] == [
+        SAMPLE_ARTICLE, "A follow-up claim about the same story."]
+    assert detail["turns"][0]["verdict"]["verdict"] == "uncertain"
+
+    # privacy: bob and anonymous callers can't read alice's chat or checks
+    assert client.get(f"/conversations/{conv_id}", headers=bob).status_code == 404
+    assert client.get("/conversations").status_code == 401
+    assert client.get(f"/articles/{first.json()['id']}").status_code == 404
+    assert client.get(f"/articles/{first.json()['id']}", headers=alice).status_code == 200
+
+    renamed = client.patch(f"/conversations/{conv_id}", json={"title": "Energy story"}, headers=alice)
+    assert renamed.json()["title"] == "Energy story"
+    assert client.delete(f"/conversations/{conv_id}", headers=alice).status_code == 204
+    assert client.get("/conversations", headers=alice).json() == []
+
+
+def test_guest_check_is_claimed_into_a_chat_after_sign_in(client):
+    from config import settings
+    settings.GUEST_QUERY_LIMIT = 1
+    _reset_guest_usage()
+
+    with patch("api.routers.articles.run_verification_pipeline", return_value=_uncertain_vr()):
+        guest = client.post("/articles/submit", json={"text": SAMPLE_ARTICLE})
+    guest_id = guest.json()["id"]
+
+    carol = _signup(client, "carol")
+    claimed = client.post("/conversations/claim", json={"article_ids": [guest_id]}, headers=carol)
+    assert claimed.status_code == 201
+    assert [t["id"] for t in claimed.json()["turns"]] == [guest_id]
+    # can't be claimed twice
+    dave = _signup(client, "dave")
+    assert client.post("/conversations/claim", json={"article_ids": [guest_id]},
+                       headers=dave).status_code == 404
 
 
 def test_submit_article_no_text_or_url(client, admin_token):
@@ -164,7 +301,8 @@ def test_submit_and_retrieve_article(client, admin_token):
     # TestClient runs BackgroundTasks before returning, so the pipeline has
     # already finished by the time we poll.
     article_id = body["id"]
-    get_resp = client.get(f"/articles/{article_id}")
+    get_resp = client.get(f"/articles/{article_id}",
+                          headers={"Authorization": f"Bearer {admin_token}"})
     assert get_resp.status_code == 200
     done = get_resp.json()
     assert done["id"] == article_id
@@ -200,7 +338,8 @@ def test_submit_uncertain_verdict_is_returned_without_review_queue(client, admin
     assert resp.status_code == 202
     article_id = resp.json()["id"]
 
-    done = client.get(f"/articles/{article_id}").json()
+    done = client.get(f"/articles/{article_id}",
+                      headers={"Authorization": f"Bearer {admin_token}"}).json()
     assert done["status"] == "completed"
     assert done["verdict"]["verdict"] == "uncertain"
     assert "needs_human_review" not in done["verdict"]
@@ -269,7 +408,8 @@ def test_claim_location_round_trips_through_storage(client, admin_token):
     with patch("api.routers.articles.run_verification_pipeline", return_value=vr):
         resp = client.post("/articles/submit", json={"text": SAMPLE_ARTICLE},
                            headers={"Authorization": f"Bearer {admin_token}"})
-    body = client.get(f"/articles/{resp.json()['id']}").json()
+    body = client.get(f"/articles/{resp.json()['id']}",
+                      headers={"Authorization": f"Bearer {admin_token}"}).json()
 
     cv = body["verdict"]["claim_verdicts"][0]
     assert cv["location"]["name"] == "Pune" and cv["location"]["level"] == "city"
@@ -288,7 +428,8 @@ def test_claims_stored_before_regions_existed_still_load(client, admin_token):
     with patch("api.routers.articles.run_verification_pipeline", return_value=vr):
         resp = client.post("/articles/submit", json={"text": SAMPLE_ARTICLE},
                            headers={"Authorization": f"Bearer {admin_token}"})
-    cv = client.get(f"/articles/{resp.json()['id']}").json()["verdict"]["claim_verdicts"][0]
+    cv = client.get(f"/articles/{resp.json()['id']}",
+                    headers={"Authorization": f"Bearer {admin_token}"}).json()["verdict"]["claim_verdicts"][0]
     assert cv["location"] is None and cv["regional_evidence"] == 0 and cv["in_region"] == []
 
 

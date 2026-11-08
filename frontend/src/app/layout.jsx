@@ -7,8 +7,10 @@ import "@/styles/landing.css";
 import "@/styles/pages.css";
 import "@/styles/chat.css";
 import "@/styles/footer.css";
+import "@/styles/auth.css";
 
 import ErrorBoundary from "@/components/ErrorBoundary";
+import { AuthProvider } from "@/context/AuthContext";
 
 export const metadata = {
     title: "The Daily Truth",
@@ -35,7 +37,9 @@ export default function RootLayout({ children }) {
         </head>
         <body>
             <ErrorBoundary>
-                {children}
+                <AuthProvider>
+                    {children}
+                </AuthProvider>
             </ErrorBoundary>
         </body>
         </html>

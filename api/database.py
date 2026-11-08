@@ -46,7 +46,13 @@ def create_tables() -> None:
 # real rows — so without this, adding a field to the ORM produces
 # "no such column" at query time on any existing install.
 _ADDED_COLUMNS: dict[str, dict[str, str]] = {
-    "articles": {"stage": "VARCHAR(64)"},
+    "articles": {
+        "stage": "VARCHAR(64)",
+        "user_id": "INTEGER",
+        "conversation_id": "INTEGER",
+        "guest_key": "VARCHAR(128)",
+        "kind": "VARCHAR(16)",
+    },
     "verdicts": {"degradations": "TEXT", "fused_score": "FLOAT"},
 }
 

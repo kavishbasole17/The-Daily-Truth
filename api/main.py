@@ -17,10 +17,16 @@ Existing endpoints (unchanged):
     GET  /results/charts/{name}    Serve a chart PNG by name
 
 New endpoints (agentic pipeline + persistence):
-    POST /auth/token               Obtain a JWT bearer token
-    POST /articles/submit          Run verification pipeline, persist result  [auth required]
-    POST /articles/submit-image    OCR an image, then run verification pipeline [auth required]
+    POST /auth/token               Sign in (username or email + password) -> JWT
+    POST /auth/register            Create an account -> JWT
+    GET  /auth/me                  The signed-in user
+    POST /auth/google              Sign in with a Google ID token (needs GOOGLE_CLIENT_ID)
+    GET  /auth/guest               Free signed-out queries remaining
+    POST /articles/submit          Run verification pipeline, persist result  [1 free, then auth]
+    POST /articles/submit-image    OCR an image, then run verification pipeline [1 free, then auth]
     GET  /articles/{id}            Retrieve stored article + verdict
+    GET  /conversations            Signed-in user's chat history          [auth required]
+    GET  /conversations/{id}       One chat with all its checks            [auth required]
     GET  /models/registry          Benchmark data from registry.json
 """
 
@@ -54,6 +60,8 @@ except ImportError:  # pragma: no cover
 from api.routers import auth as auth_router
 from api.routers import articles as articles_router
 from api.routers import model_registry as reg_router
+from api.routers import conversations as conversations_router
+from api.auth import seed_users
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,6 +88,7 @@ async def lifespan(app: FastAPI):
     try:
         create_tables()
         ensure_columns()   # additive columns on an existing paper_trail.db
+        seed_users()       # admin / analyst / testuser accounts
         logger.info('Database tables initialised.')
     except Exception as e:
         logger.error(f'Failed to create DB tables: {e}')
@@ -129,8 +138,9 @@ app = FastAPI(
         'with NLI claim checking and evidence retrieval.\n\n'
         '**Before starting:** run `python export_models.py` once to train and '
         'save all models to the `models/` directory.\n\n'
-        '**Auth:** `POST /auth/token` with `admin`/`admin123` or `analyst`/`analyst123` '
-        'to get a JWT for protected endpoints.'
+        '**Auth:** one verification query is free without signing in; after that, '
+        '`POST /auth/token` with `testuser`/`Test@1234` (or `admin`/`admin123`) '
+        'to get a JWT. Signed-in checks are saved under `/conversations`.'
     ),
     version='2.0.0',
     lifespan=lifespan,
@@ -148,6 +158,7 @@ app.add_middleware(
 app.include_router(auth_router.router)
 app.include_router(articles_router.router)
 app.include_router(reg_router.router)
+app.include_router(conversations_router.router)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
