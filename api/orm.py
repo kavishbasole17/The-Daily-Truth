@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime
 
 from sqlalchemy import (
-    Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func,
+    Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -64,6 +64,10 @@ class Conversation(Base):
     articles: Mapped[list["Article"]] = relationship(
         "Article", back_populates="conversation", order_by="Article.id"
     )
+    questions: Mapped[list["ChatQuestion"]] = relationship(
+        "ChatQuestion", back_populates="conversation", order_by="ChatQuestion.id",
+        cascade="all, delete-orphan",
+    )
 
 
 class GuestUsage(Base):
@@ -96,8 +100,14 @@ class Article(Base):
     # Who submitted a guest article, so it can be claimed into a conversation
     # by the same client after they sign in.
     guest_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    # text | image
+    # text | image | url | chat (a claim the assistant checked mid-conversation)
     kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # For a link check: the page title the fetcher found.
+    source_title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Why a check failed, in words a user can act on ("the site needs a login").
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Public read-only link id (/v/<slug>); NULL until the owner shares it.
+    share_slug: Mapped[str | None] = mapped_column(String(32), unique=True, index=True, nullable=True)
     url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     # Raw text stored verbatim (no cleaning) so the API can echo it back
     text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -114,6 +124,65 @@ class Article(Base):
     conversation: Mapped["Conversation"] = relationship(
         "Conversation", back_populates="articles"
     )
+    feedback: Mapped[list["Feedback"]] = relationship(
+        "Feedback", back_populates="article", cascade="all, delete-orphan"
+    )
+
+
+class Feedback(Base):
+    """
+    A user's rating of a verdict. Kept as labelled data: a thumbs-down with a
+    reason is exactly the signal needed to re-fit the fusion adjudicator
+    (scripts/train_fusion.py) on cases the pipeline got wrong.
+    """
+    __tablename__ = "feedback"
+    __table_args__ = (UniqueConstraint("article_id", "user_id", name="uq_feedback_article_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    article_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("articles.id"), nullable=False, index=True
+    )
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)        # +1 | -1
+    # wrong_verdict | bad_sources | missed_claim | other (only for -1)
+    reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # What the verdict was when it was rated, so later re-runs don't blur the label.
+    verdict_at_rating: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    article: Mapped["Article"] = relationship("Article", back_populates="feedback")
+
+
+class ChatQuestion(Base):
+    """A follow-up question asked in a conversation, answered from its evidence."""
+    __tablename__ = "chat_questions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("conversations.id"), nullable=False, index=True
+    )
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    # JSON list of {n, claim, source, url, snippet}
+    citations: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # llm | extractive | heuristic
+    mode: Mapped[str] = mapped_column(String(16), default="llm")
+    # Chat messages are answered in the background: pending -> thinking -> done | failed
+    status: Mapped[str | None] = mapped_column(String(16), nullable=True, default="done")
+    # thinking | verifying | writing — what the assistant is doing right now
+    stage: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # JSON {article_id, claim_index|null}: the finding this message is about
+    focus: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # JSON list of Article ids for checks the assistant ran while replying
+    article_ids: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+
+    conversation: Mapped["Conversation"] = relationship("Conversation", back_populates="questions")
 
 
 class Verdict(Base):

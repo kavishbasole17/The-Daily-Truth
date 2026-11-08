@@ -158,7 +158,42 @@ docker compose up --build
 | GET | `/conversations` | ✓ | Previous chats, most recent first |
 | GET / PATCH / DELETE | `/conversations/{id}` | ✓ | Open / rename / delete a chat |
 | POST | `/conversations/claim` | ✓ | Move this client's signed-out check into a new chat after sign-in |
+| POST | `/conversations/{id}/messages` | ✓ | Talk about the chat's findings (optional `focus` on one claim/verdict); the assistant may run new checks. 202, then poll |
+| GET | `/conversations/{id}/messages/{mid}` | ✓ | Poll a reply: `status`, `stage`, `answer`, `citations`, `checks` |
+| POST | `/conversations/{id}/ask` | ✓ | (Legacy) synchronous, evidence-only answer |
+| POST / DELETE | `/articles/{id}/share` | owner | Create / revoke a public read-only link (`/v/<slug>`) |
+| GET | `/share/{slug}` | — | A shared check (no owner info) |
+| PUT / DELETE | `/articles/{id}/feedback` | ✓ | Rate a verdict: `{"rating": 1}` or `{"rating": -1, "reason": "bad_sources", "comment": "..."}` |
 | GET | `/models/registry` | — | Registry for analytics dashboard |
+
+### Paper Trail features
+
+- **Check a link:** paste a news URL (or send `{"url": ...}`) and the server fetches the page
+  (`api/url_fetch.py`, with `trafilatura` when installed), then verifies the article. Only public
+  http(s) hosts are fetched; private/loopback/metadata addresses are refused on every redirect.
+- **Linked sources:** each evidence snippet links to its article, with the outlet, publish date and
+  a trust dot (green / amber / grey).
+- **Claim highlighting:** each extracted claim is underlined in the checked text in its verdict
+  colour; click one to jump to its evidence.
+- **Shareable verdicts:** "Share" creates a public `/v/<slug>` page with a generated preview image
+  for WhatsApp/X/Slack. "Stop sharing" revokes it. Set `NEXT_PUBLIC_SITE_URL` (and, in Docker,
+  `API_INTERNAL_URL`) on the frontend so preview links are absolute.
+- **Feedback:** 👍/👎 per verdict (signed in). A 👎 records a reason and comment in the `feedback`
+  table, with the verdict at the time, as labelled data for re-fitting the fusion model.
+- **Chat continuity:** after a check, keep talking in the same chat. Ask about a finding, push back
+  on it ("but I read it was 1887"), or ask for a verdict. "Discuss" on any claim or verdict focuses
+  the next message on that finding. Replies draw on every check and earlier message in the chat,
+  citing evidence as `[n]`. When you state or ask about something the evidence doesn't cover, the
+  assistant runs a new check through the full pipeline (`verify_claim` tool, max 2 per reply). That
+  check shows inline, can be shared and rated, and becomes evidence for later messages.
+  - With `ANTHROPIC_API_KEY` set, replies come from `QA_MODEL` (default `claude-opus-5-5`) using
+    tool use (`api/chat.py`).
+  - Without a key, a rule-based fallback still routes statements to new checks (turning "it was…"
+    into a self-contained claim about the finding), answers verdict requests, and quotes the most
+    relevant evidence.
+  - The composer routes automatically: articles, links and images start a new check, and short
+    messages go to the assistant. A hint above the box shows which will happen, with a one-click
+    switch.
 
 ### Accounts and the free check
 

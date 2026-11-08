@@ -10,17 +10,19 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
 import tempfile
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from api.auth import consume_guest_query, get_optional_user, guest_key
+from api.auth import consume_guest_query, get_current_user, get_optional_user, guest_key
 from api.database import get_db
-from api.orm import Article, Conversation, Verdict
+from api.orm import Article, Conversation, Feedback, Verdict
+from api.url_fetch import FetchError, fetch_article, looks_like_url
 from paper_trail_core.agents.pipeline import run_verification_pipeline, run_verification_pipeline_image
 
 log = logging.getLogger(__name__)
@@ -76,9 +78,11 @@ class ArticleSubmitRequest(BaseModel):
     def _require_text_or_url(self):
         if not self.text and not self.url:
             raise ValueError("Provide either 'text' or 'url'.")
-        if not self.text and self.url:
-            # Future: fetch text from URL — for now require text
-            raise ValueError("URL-only submission not yet supported. Please include 'text'.")
+        if self.text and looks_like_url(self.text) and not self.url:
+            # A bare link pasted into the text box is a link check.
+            self.url, self.text = self.text.strip(), None
+        if not self.text and self.url and not looks_like_url(self.url):
+            raise ValueError("'url' must be a full http:// or https:// link.")
         return self
 
 
@@ -117,6 +121,9 @@ class ClaimVerdictOut(BaseModel):
     top_relevance:     float = 0.0
     numeric_conflict:  float = 0.0
     sources:           list[str] = []
+    urls:              list[str] = []          # article link per snippet ("" if none)
+    published_at:      list[str] = []          # publish time per snippet ("" if unknown)
+    trust:             list[float] = []        # source trust weight per snippet, 0-1
     status:            str = "ok"
 
     # Region-aware verification. All optional: absent for claims with no place,
@@ -153,6 +160,37 @@ class VerdictOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+FEEDBACK_REASONS = {"wrong_verdict", "bad_sources", "missed_claim", "other"}
+
+
+class FeedbackIn(BaseModel):
+    rating: int = Field(..., description="+1 (helpful) or -1 (wrong)")
+    reason: Optional[str] = Field(
+        None, description="For -1: wrong_verdict | bad_sources | missed_claim | other")
+    comment: Optional[str] = Field(None, max_length=1000)
+
+    @model_validator(mode="after")
+    def _check(self):
+        if self.rating not in (1, -1):
+            raise ValueError("rating must be 1 or -1")
+        if self.reason is not None and self.reason not in FEEDBACK_REASONS:
+            raise ValueError(f"reason must be one of {sorted(FEEDBACK_REASONS)}")
+        if self.rating == 1:
+            self.reason = None
+        return self
+
+
+class FeedbackOut(BaseModel):
+    rating: int
+    reason: Optional[str] = None
+    comment: Optional[str] = None
+
+
+class ShareOut(BaseModel):
+    slug: str
+    path: str               # frontend path, e.g. /v/abc123
+
+
 class ArticleOut(BaseModel):
     id:           int
     url:          Optional[str]
@@ -160,8 +198,15 @@ class ArticleOut(BaseModel):
     status:       str           # pending | processing | completed | failed
     submitted_at: str
     stage:        Optional[str] = None
-    kind:         Optional[str] = None          # text | image
+    kind:         Optional[str] = None          # text | image | url
     conversation_id: Optional[int] = None       # None for a signed-out (guest) query
+    source_title: Optional[str] = None          # link checks: the page's title
+    error:        Optional[str] = None          # why a failed check failed
+    # Full checked text (pasted, OCR'd or fetched) once the check is complete,
+    # so the UI can highlight claims in it. Omitted while processing.
+    full_text:    Optional[str] = None
+    share_slug:   Optional[str] = None
+    feedback:     Optional[FeedbackOut] = None  # the owner's rating, if any
     verdict:      Optional[VerdictOut] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -197,8 +242,22 @@ def _build_article_out(article: Article) -> ArticleOut:
         stage=article.stage,
         kind=article.kind,
         conversation_id=article.conversation_id,
+        source_title=article.source_title,
+        error=article.error_message,
+        full_text=article.text if article.status == "completed" else None,
+        share_slug=article.share_slug,
+        feedback=_owner_feedback(article),
         verdict=verdict_out,
     )
+
+
+def _owner_feedback(article: Article) -> Optional[FeedbackOut]:
+    if article.user_id is None:
+        return None
+    for f in article.feedback:
+        if f.user_id == article.user_id:
+            return FeedbackOut(rating=f.rating, reason=f.reason, comment=f.comment)
+    return None
 
 
 def _chat_title(text: str) -> str:
@@ -267,6 +326,25 @@ def _run_pipeline_job(article_id: int, text: str, url: Optional[str],
             log.error("pipeline job: article_id=%d disappeared", article_id)
             return
 
+        if not text and url:
+            # Link check: fetch the page, then verify what it says.
+            article.status = "processing"
+            article.stage = "fetching"
+            db.commit()
+            try:
+                fetched = fetch_article(url)
+            except FetchError as exc:
+                article.status = "failed"
+                article.stage = None
+                article.error_message = str(exc)
+                db.commit()
+                log.info("pipeline job: article_id=%d link fetch failed: %s", article_id, exc)
+                return
+            text = fetched.text[:MAX_ARTICLE_TEXT_LEN]
+            article.text = text
+            article.url = fetched.url
+            article.source_title = fetched.title or None
+
         article.status = "processing"
         article.stage = "verifying"
         db.commit()
@@ -300,6 +378,7 @@ def _run_pipeline_job(article_id: int, text: str, url: Optional[str],
             if article is not None:
                 article.status = "failed"
                 article.stage = None
+                article.error_message = "Something went wrong while verifying this. Please try again."
                 db.commit()
         except Exception:
             log.exception("pipeline job: could not mark article_id=%d failed", article_id)
@@ -364,6 +443,7 @@ def _run_pipeline_image_job(article_id: int, image_path: str, url: Optional[str]
             if article is not None:
                 article.status = "failed"
                 article.stage = None
+                article.error_message = "Something went wrong while verifying this. Please try again."
                 db.commit()
         except Exception:
             log.exception("pipeline job (image): could not mark article_id=%d failed", article_id)
@@ -391,7 +471,9 @@ def submit_article(
     user: Optional[dict] = Depends(get_optional_user),
 ) -> ArticleOut:
     """
-    Submit a news article for automated fake-news detection.
+    Submit a news article for automated fake-news detection: as `text`, or
+    as just a `url` (a bare link in `text` counts too), in which case the server
+    fetches the page and verifies the article on it.
 
     Returns **202 Accepted** immediately with `status="processing"`. Poll
     `GET /articles/{id}` until `status` becomes `completed` or `failed`; the
@@ -422,9 +504,10 @@ def submit_article(
     `detail.code = "guest_limit_reached"`). Signed-in submissions are saved to
     a conversation — pass `conversation_id` to continue one.
     """
-    owner = _assign_owner(db, request, user, req.conversation_id, req.text)
-    article = Article(text=req.text, url=req.url, status="processing", stage="queued",
-                      kind="text", **owner)
+    is_link = not req.text
+    owner = _assign_owner(db, request, user, req.conversation_id, req.text or req.url)
+    article = Article(text=req.text or "", url=req.url, status="processing", stage="queued",
+                      kind="url" if is_link else "text", **owner)
     db.add(article)
     db.commit()
     db.refresh(article)
@@ -536,3 +619,88 @@ def get_article(
             detail=f"Article {article_id} not found",
         )
     return _build_article_out(article)
+
+
+# ── Sharing ────────────────────────────────────────────────────────────────────
+
+def _can_manage(article: Article, user: Optional[dict], request: Request) -> bool:
+    """Owner (or admin) of a saved check, or the same client for a guest check."""
+    if article.user_id is not None:
+        return user is not None and (user["id"] == article.user_id or user["role"] == "admin")
+    return article.guest_key is not None and article.guest_key == guest_key(request)
+
+
+@router.post("/{article_id}/share", response_model=ShareOut,
+             summary="Create (or return) a public read-only link to a check")
+def share_article(
+    article_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: Optional[dict] = Depends(get_optional_user),
+) -> ShareOut:
+    article = db.get(Article, article_id)
+    if article is None or not _can_manage(article, user, request):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Article {article_id} not found")
+    if article.status != "completed":
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="Only finished checks can be shared.")
+    if not article.share_slug:
+        article.share_slug = secrets.token_urlsafe(9)
+        db.commit()
+    return ShareOut(slug=article.share_slug, path=f"/v/{article.share_slug}")
+
+
+@router.delete("/{article_id}/share", status_code=status.HTTP_204_NO_CONTENT,
+               summary="Turn off the public link")
+def unshare_article(
+    article_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: Optional[dict] = Depends(get_optional_user),
+) -> Response:
+    article = db.get(Article, article_id)
+    if article is None or not _can_manage(article, user, request):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Article {article_id} not found")
+    article.share_slug = None
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── Feedback ───────────────────────────────────────────────────────────────────
+
+@router.put("/{article_id}/feedback", response_model=FeedbackOut,
+            summary="Rate a verdict (one rating per user, updatable)")
+def rate_article(
+    article_id: int,
+    req: FeedbackIn,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+) -> FeedbackOut:
+    article = db.get(Article, article_id)
+    if article is None or not _can_read(article, user):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Article {article_id} not found")
+    if not article.verdicts:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="This check has no verdict to rate yet.")
+    fb = db.query(Feedback).filter(Feedback.article_id == article_id,
+                                   Feedback.user_id == user["id"]).one_or_none()
+    if fb is None:
+        fb = Feedback(article_id=article_id, user_id=user["id"])
+        db.add(fb)
+    fb.rating = req.rating
+    fb.reason = req.reason
+    fb.comment = (req.comment or "").strip() or None
+    fb.verdict_at_rating = article.verdicts[-1].verdict
+    db.commit()
+    return FeedbackOut(rating=fb.rating, reason=fb.reason, comment=fb.comment)
+
+
+@router.delete("/{article_id}/feedback", status_code=status.HTTP_204_NO_CONTENT,
+               summary="Remove my rating")
+def unrate_article(
+    article_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+) -> Response:
+    db.query(Feedback).filter(Feedback.article_id == article_id,
+                              Feedback.user_id == user["id"]).delete()
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -21,7 +21,9 @@ class Settings(BaseSettings):
     # lexical heuristic in place of NLI for its entire life. Each stage now
     # names its own backend, so "which algorithm actually ran" is answerable
     # from config alone.
-    CLAIM_BACKEND: str = "heuristic"    # heuristic | llm | naive(regression-test only)
+    # llm = Claude extracts claims (falls back to the local heuristic, recorded
+    # as a degradation, if the call fails or no key is set).
+    CLAIM_BACKEND: str = "llm"          # llm | heuristic | naive(regression-test only)
     NLI_BACKEND: str = "transformer"    # transformer | lexical | off
     EVIDENCE_BACKEND: str = "live"      # live | cache_only | mock
     ENSEMBLE_BACKEND: str = "real"      # real | mock
@@ -106,7 +108,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
     LLM_PROVIDER: str = "anthropic"           # "anthropic" | "openai"
-    LLM_MODEL: str = "claude-haiku-4-5-20251001"
+    LLM_MODEL: str = "claude-opus-5-5"     # claim extraction + translation
 
     # ------------------------------------------------------------------
     # Search APIs
@@ -189,6 +191,12 @@ class Settings(BaseSettings):
 
     # Seed a ready-to-use test account at startup (see README "Test account").
     SEED_TEST_USER: bool = True
+
+    # Follow-up questions in a chat (POST /conversations/{id}/ask) are answered
+    # by an LLM from the chat's own evidence. Uses LLM_PROVIDER and its API key;
+    # without a key, answers fall back to showing the most relevant evidence.
+    QA_ENABLED: bool = True
+    QA_MODEL: str = "claude-opus-5-5"
 
     # ------------------------------------------------------------------
     # Databases

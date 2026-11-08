@@ -13,6 +13,13 @@
 // Signed out, one check is free; follow-ups need an account (SignInGate).
 // Signed in, every check is saved to a conversation, listed in the
 // "Previous chats" sidebar and reopenable via /verify?c=<id>.
+//
+// Inside a saved chat the conversation continues: short messages go to the
+// assistant, which answers from every check and earlier exchange in the chat
+// and can run new checks on statements you make ("but I read it was 1887").
+// "Discuss" on any claim or verdict focuses the next message on that finding.
+// Articles, links and images still start a new check; the hint above the
+// composer says which will happen and lets you switch.
 
 "use client";
 
@@ -23,6 +30,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import Navbar from "@/components/Navbar";
 import ChatComposer from "@/components/ChatComposer";
 import ChatHistorySidebar, { parseServerTime } from "@/components/ChatHistorySidebar";
+import VerdictReport, { HighlightedText, VERDICT_META } from "@/components/VerdictReport";
+import CheckActions from "@/components/CheckActions";
 import { useAuth } from "@/context/AuthContext";
 
 import {
@@ -32,8 +41,11 @@ import {
     getConversation,
     getGuestStatus,
     isGuestLimitError,
+    isLink,
     listConversations,
+    pollChatMessage,
     pollVerification,
+    sendChatMessage,
     verifyArticle,
     verifyImage,
 } from "@/services/api";
@@ -46,39 +58,29 @@ function formatTime(ts) {
     return new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-const VERDICT_META = {
-    likely_real: { label: "LIKELY REAL", className: "real-card" },
-    likely_fake: { label: "LIKELY MISINFORMATION", className: "fake-card" },
-    uncertain: { label: "UNCERTAIN", className: "uncertain-card" },
-};
-
-const CLAIM_VERDICT_META = {
-    entailment: { label: "SUPPORTED", className: "badge-real", trailClass: "verdict-entailment" },
-    contradiction: { label: "CONTRADICTED", className: "badge-fake", trailClass: "verdict-contradiction" },
-    neutral: { label: "NO CLEAR SIGNAL", className: "badge-neutral", trailClass: "verdict-neutral" },
-    // Distinct from "neutral" on purpose. Neutral means we found evidence and
-    // it was inconclusive; unverifiable means we found nothing to check
-    // against. Collapsing the two is what previously let "no search results"
-    // masquerade as a signal about the article.
-    unverifiable: { label: "COULD NOT VERIFY", className: "badge-neutral", trailClass: "verdict-unverifiable" },
-};
-
 const SUGGESTIONS = [
     "Paste a breaking-news article",
-    "Check a viral social media claim",
+    "Paste a link to a news story",
     "Paste (Ctrl+V) a copied screenshot",
 ];
 
 const STAGE_COPY = {
-    queued: "Queued for verification…",
-    verifying: "Extracting claims and checking them against sources…",
-    processing: "Extracting claims and checking them against sources…",
-};
-
-const OCR_STAGE_COPY = {
-    queued: "Queued for verification…",
-    verifying: "Reading the image and checking claims against sources…",
-    processing: "Reading the image and checking claims against sources…",
+    text: {
+        queued: "Queued for verification…",
+        verifying: "Extracting claims and checking them against sources…",
+        processing: "Extracting claims and checking them against sources…",
+    },
+    image: {
+        queued: "Queued for verification…",
+        verifying: "Reading the image and checking claims against sources…",
+        processing: "Reading the image and checking claims against sources…",
+    },
+    url: {
+        queued: "Queued for verification…",
+        fetching: "Fetching the article from the link…",
+        verifying: "Checking the article's claims against sources…",
+        processing: "Checking the article's claims against sources…",
+    },
 };
 
 // Mirrors api/routers/articles.py's _EXT_BY_CONTENT_TYPE / OCR_MAX_IMAGE_MB —
@@ -87,264 +89,254 @@ const OCR_STAGE_COPY = {
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/bmp", "image/tiff"];
 const MAX_IMAGE_MB = 10;
 
-function CheckIcon() {
+function AssistantAvatar() {
     return (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
+        <div className="chat-avatar">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 3v5a1 1 0 001 1h5" />
+                <path d="M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z" />
+                <path d="M9 13h6M9 17h4" />
+            </svg>
+        </div>
     );
 }
 
-function CopyTraceButton({ text }) {
-    const [copied, setCopied] = useState(false);
-
-    const handleCopy = async (e) => {
-        // Lives inside a <summary> — stop the click from also toggling the
-        // <details> open/closed, which is <summary>'s native click behavior.
-        e.preventDefault();
-        e.stopPropagation();
-        try {
-            await navigator.clipboard.writeText(text);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-        } catch {
-            // Clipboard API unavailable (e.g. insecure context) — nothing
-            // useful to recover into; the trace is still visible to select.
-        }
-    };
-
-    return (
-        <button type="button" className={`chat-copy-btn ${copied ? "copied" : ""}`} onClick={handleCopy}>
-            {copied ? (
-                <>
-                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M20 6L9 17l-5-5" />
-                    </svg>
-                    Copied
-                </>
-            ) : (
-                <>
-                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="9" y="9" width="13" height="13" rx="2" />
-                        <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-                    </svg>
-                    Copy
-                </>
-            )}
-        </button>
-    );
+function safeHost(url) {
+    try {
+        return new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+        return url;
+    }
 }
 
-function AssistantResult({ result, extractedText }) {
-    const verdict = result?.verdict;
-    if (!verdict) return null;
-    const meta = VERDICT_META[verdict.verdict] || VERDICT_META.uncertain;
-
-    return (
-        <>
-            {extractedText && (
-                <div className="chat-extracted-text">
-                    <div className="chat-section-title">
-                        <CheckIcon />
-                        Text extracted from image
-                    </div>
-                    <p>&ldquo;{extractedText}&rdquo;</p>
-                </div>
-            )}
-
-            <div className={`chat-verdict ${meta.className}`}>
-                <div>
-                    <h2>{meta.label}</h2>
-                    <p>
-                        {verdict.verdict === "uncertain" && !verdict.confidence
-                            ? "Not enough evidence to decide"
-                            : `${Math.round(verdict.confidence * 100)}% confidence`}
-                    </p>
-                </div>
-            </div>
-
-            {verdict.degradations?.length > 0 && (
-                <div className="chat-section">
-                    <div className="chat-section-title">Limitations affecting this verdict</div>
-                    <ul className="evidence-list">
-                        {verdict.degradations.map((d, i) => (
-                            <li key={i}>{d.detail}</li>
-                        ))}
-                    </ul>
-                </div>
-            )}
-
-            <div className="chat-section">
-                <div className="chat-section-title">
-                    <CheckIcon />
-                    Claim-by-claim trail
-                </div>
-
-                {verdict.claim_verdicts.length === 0 ? (
-                    <p className="muted">
-                        No individually verifiable claims were extracted from this article.
-                    </p>
-                ) : (
-                    <div className="claim-trail-timeline">
-                        {verdict.claim_verdicts.map((cv, i) => {
-                            const cvMeta = CLAIM_VERDICT_META[cv.verdict] || CLAIM_VERDICT_META.neutral;
-                            return (
-                                <div className="claim-trail-row" key={i}>
-                                    <span className={`claim-trail-dot ${cvMeta.trailClass}`} />
-                                    <span className="claim-trail-line" />
-                                    <div className={`claim-item ${cvMeta.trailClass}`}>
-                                        <div className="claim-index">Claim {i + 1}</div>
-                                        <div className="claim-item-header">
-                                            <span className={cvMeta.className}>{cvMeta.label}</span>
-                                            <span className="claim-confidence">
-                                                {Math.round(cv.confidence * 100)}% confidence
-                                            </span>
-                                        </div>
-                                        <p className="claim-text">&ldquo;{cv.claim}&rdquo;</p>
-                                        {cv.location && (
-                                            <p className="claim-location">
-                                                <span className="evidence-source">
-                                                    {cv.location.level || "place"}
-                                                </span>
-                                                {cv.location.label || cv.location.name}
-                                                {cv.search_scope && (
-                                                    <span className="muted">
-                                                        {" "}· searched {cv.search_scope}
-                                                        {cv.regional_evidence > 0
-                                                            ? ` · ${cv.regional_evidence} local source${cv.regional_evidence === 1 ? "" : "s"}`
-                                                            : " · no local sources found"}
-                                                    </span>
-                                                )}
-                                            </p>
-                                        )}
-                                        {cv.event_corroborated && (
-                                            <p className="claim-location">
-                                                <span className="evidence-source">event</span>
-                                                Reported by {cv.corroborating_sources.join(", ")}
-                                                {cv.detail_mismatch && (
-                                                    <span className="muted"> · figures differ from the reports</span>
-                                                )}
-                                            </p>
-                                        )}
-                                        {cv.evidence_snippets.length > 0 && (
-                                            <ul className="evidence-list">
-                                                {cv.evidence_snippets.map((s, j) => (
-                                                    <li key={j}>
-                                                        {cv.sources?.[j] && (
-                                                            <span className="evidence-source">{cv.sources[j]}</span>
-                                                        )}
-                                                        {cv.in_region?.[j] && (
-                                                            <span className="evidence-source evidence-local">local</span>
-                                                        )}
-                                                        {s}
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        )}
-                                        {cv.verdict === "unverifiable" && (
-                                            <p className="muted">
-                                                No source covering this claim was found. That is not
-                                                evidence against it — recent, regional and non-English
-                                                topics are often missed.
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
-            </div>
-
-            <details className="model-card reasoning-trace">
-                <summary>
-                    Full reasoning trace
-                    <CopyTraceButton text={verdict.reasoning_trace} />
-                </summary>
-                <pre className="model-content">{verdict.reasoning_trace}</pre>
-            </details>
-        </>
-    );
-}
-
-function UserBubble({ message, expanded, onToggleExpand }) {
+function UserBubble({ message, expanded, onToggleExpand, claimVerdicts, anchorPrefix }) {
+    let body;
     if (message.kind === "image") {
-        return (
-            <div className="chat-message user">
-                <div className="chat-avatar">YOU</div>
-                <div className="chat-message-col">
-                    <div className="chat-bubble">
-                        {message.previewUrl && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img className="chat-image-preview" src={message.previewUrl} alt="Submitted for OCR" />
-                        )}
-                        <div className="chat-image-filename">
-                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <rect x="3" y="3" width="18" height="18" rx="2" />
-                                <circle cx="8.5" cy="8.5" r="1.5" />
-                                <path d="M21 15l-5-5L5 21" />
-                            </svg>
-                            {message.fileName}
-                        </div>
-                    </div>
-                    <span className="chat-timestamp">{formatTime(message.timestamp)}</span>
+        body = (
+            <>
+                {message.previewUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img className="chat-image-preview" src={message.previewUrl} alt="Submitted for OCR" />
+                )}
+                <div className="chat-image-filename">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <path d="M21 15l-5-5L5 21" />
+                    </svg>
+                    {message.fileName}
                 </div>
-            </div>
+            </>
+        );
+    } else if (message.kind === "url") {
+        body = (
+            <a className="chat-link-card" href={message.text} target="_blank" rel="noopener noreferrer nofollow">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.7 1.7M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7l1.7-1.7" />
+                </svg>
+                <span>
+                    <strong>{message.title || safeHost(message.text)}</strong>
+                    <small>{message.text}</small>
+                </span>
+            </a>
+        );
+    } else if (message.kind === "question") {
+        body = (
+            <>
+                {message.focusLabel && <div className="chat-focus-tag">Re: {message.focusLabel}</div>}
+                <div className="chat-question-text">{message.text}</div>
+            </>
+        );
+    } else {
+        const text = message.text;
+        const isLong = text.length > 400;
+        body = (
+            <>
+                <div className={`chat-article-text ${expanded ? "expanded" : ""}`}>
+                    {claimVerdicts?.length ? (
+                        <HighlightedText text={text} claimVerdicts={claimVerdicts} anchorPrefix={anchorPrefix} />
+                    ) : text}
+                </div>
+                {isLong && (
+                    <button type="button" className="chat-expand-btn" onClick={onToggleExpand}>
+                        {expanded ? "Show less" : "Show full article"}
+                    </button>
+                )}
+            </>
         );
     }
 
-    const text = message.text;
-    const isLong = text.length > 400;
     return (
         <div className="chat-message user">
             <div className="chat-avatar">YOU</div>
             <div className="chat-message-col">
-                <div className="chat-bubble">
-                    <div className={`chat-article-text ${expanded ? "expanded" : ""}`}>
-                        {text}
-                    </div>
-                    {isLong && (
-                        <button type="button" className="chat-expand-btn" onClick={onToggleExpand}>
-                            {expanded ? "Show less" : "Show full article"}
-                        </button>
-                    )}
-                </div>
+                <div className={`chat-bubble ${message.kind === "question" ? "question" : ""}`}>{body}</div>
                 <span className="chat-timestamp">{formatTime(message.timestamp)}</span>
             </div>
         </div>
     );
 }
 
-function AssistantBubble({ message }) {
-    const stageCopy = message.kind === "image" ? OCR_STAGE_COPY : STAGE_COPY;
-    const extractedText = message.kind === "image" ? message.result?.text_preview : null;
+const CHAT_STAGE_COPY = {
+    thinking: "Thinking it through…",
+    verifying: "Running a new check on that…",
+    writing: "Writing a reply…",
+};
+
+// "[2]" in an answer becomes a link to citation 2 below it; **x** is bold.
+function AnswerText({ text, citations, anchorPrefix }) {
+    const known = new Set((citations || []).map(c => c.n));
+    const parts = text.split(/(\[\d{1,3}\]|\*\*[^*\n]+\*\*)/g);
+    return (
+        <div className="chat-answer-text">
+            {parts.map((p, i) => {
+                const m = p.match(/^\[(\d{1,3})\]$/);
+                if (m && known.has(Number(m[1]))) {
+                    return (
+                        <a key={i} className="cite-ref" href={`#${anchorPrefix}-cite-${m[1]}`}>{m[1]}</a>
+                    );
+                }
+                const b = p.match(/^\*\*([^*\n]+)\*\*$/);
+                if (b) return <strong key={i}>{b[1]}</strong>;
+                return <span key={i}>{p}</span>;
+            })}
+        </div>
+    );
+}
+
+// A check the assistant ran mid-conversation: compact, expandable to the full report.
+function InlineCheck({ check, signedIn, onDiscuss }) {
+    const [open, setOpen] = useState(false);
+    const v = check.verdict;
+    if (check.status !== "completed" || !v) {
+        return (
+            <div className="inline-check pending">
+                <span className="inline-check-label">
+                    {check.status === "failed" ? "Check failed" : "Checking…"}
+                </span>
+                <span className="inline-check-claim">&ldquo;{check.full_text || check.text_preview}&rdquo;</span>
+                {check.status === "failed" && check.error && <span className="muted">{check.error}</span>}
+            </div>
+        );
+    }
+    const meta = VERDICT_META[v.verdict] || VERDICT_META.uncertain;
+    return (
+        <div className={`inline-check ${meta.className}`}>
+            <div className="inline-check-head">
+                <span className="inline-check-label">New check · {meta.label}</span>
+                <span className="muted">{Math.round((v.confidence || 0) * 100)}%</span>
+            </div>
+            <span className="inline-check-claim">&ldquo;{check.full_text || check.text_preview}&rdquo;</span>
+            <button type="button" className="check-link-btn" onClick={() => setOpen(o => !o)}>
+                {open ? "Hide full report" : "Show full report"}
+            </button>
+            {open && (
+                <div className="inline-check-report">
+                    <VerdictReport
+                        result={check}
+                        anchorPrefix={`c${check.id}`}
+                        onDiscuss={onDiscuss ? idx => onDiscuss(check, idx) : undefined}
+                    />
+                    <CheckActions result={check} signedIn={signedIn} />
+                </div>
+            )}
+        </div>
+    );
+}
+
+function AnswerView({ answer, anchorPrefix, signedIn, onDiscuss }) {
+    return (
+        <>
+            {answer.checks?.length > 0 && (
+                <div className="inline-checks">
+                    {answer.checks.map(c => (
+                        <InlineCheck key={c.id} check={c} signedIn={signedIn} onDiscuss={onDiscuss} />
+                    ))}
+                </div>
+            )}
+            <AnswerText text={answer.answer} citations={answer.citations} anchorPrefix={anchorPrefix} />
+            {answer.citations?.length > 0 && (
+                <ol className="chat-citations">
+                    {answer.citations.map(c => (
+                        <li key={c.n} id={`${anchorPrefix}-cite-${c.n}`}>
+                            <span className="cite-num">{c.n}</span>
+                            <div>
+                                {c.url ? (
+                                    <a className="evidence-source evidence-link" href={c.url} target="_blank" rel="noopener noreferrer nofollow">
+                                        {c.source || safeHost(c.url)}
+                                    </a>
+                                ) : (
+                                    c.source && <span className="evidence-source">{c.source}</span>
+                                )}
+                                <span>{c.snippet}</span>
+                            </div>
+                        </li>
+                    ))}
+                </ol>
+            )}
+            {(answer.mode === "extractive" || answer.mode === "heuristic") && (
+                <p className="muted chat-answer-note">
+                    Basic reply mode: no AI model is configured, so replies are assembled from this chat&rsquo;s evidence.
+                </p>
+            )}
+        </>
+    );
+}
+
+function AssistantBubble({ message, signedIn, onDiscuss }) {
+    const stageCopy = STAGE_COPY[message.kind] || STAGE_COPY.text;
+    const anchorPrefix = `m${message.id}`;
+    const isAnswer = message.kind === "answer";
 
     return (
         <div className="chat-message assistant">
-            <div className="chat-avatar">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M14 3v5a1 1 0 001 1h5" />
-                    <path d="M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z" />
-                    <path d="M9 13h6M9 17h4" />
-                </svg>
-            </div>
+            <AssistantAvatar />
             <div className="chat-message-col">
                 <div className="chat-bubble">
                     {message.status === "loading" && (
-                        <div className="chat-typing">
-                            {stageCopy[message.stage] || "Working…"}
-                            <span className="chat-typing-dots">
-                                <span /><span /><span />
-                            </span>
-                        </div>
+                        <>
+                            {isAnswer && message.answer?.checks?.length > 0 && (
+                                <div className="inline-checks">
+                                    {message.answer.checks.map(c => (
+                                        <InlineCheck key={c.id} check={c} signedIn={signedIn} />
+                                    ))}
+                                </div>
+                            )}
+                            <div className="chat-typing">
+                                {isAnswer
+                                    ? CHAT_STAGE_COPY[message.stage] || CHAT_STAGE_COPY.thinking
+                                    : stageCopy[message.stage] || "Working…"}
+                                <span className="chat-typing-dots">
+                                    <span /><span /><span />
+                                </span>
+                            </div>
+                        </>
                     )}
 
                     {message.status === "error" && (
                         <div className="chat-error-inline">{message.error}</div>
                     )}
 
-                    {message.status === "done" && (
-                        <AssistantResult result={message.result} extractedText={extractedText} />
+                    {message.status === "done" && isAnswer && (
+                        <AnswerView answer={message.answer} anchorPrefix={anchorPrefix} signedIn={signedIn} onDiscuss={onDiscuss} />
+                    )}
+
+                    {message.status === "done" && !isAnswer && (
+                        <>
+                            <VerdictReport
+                                result={message.result}
+                                anchorPrefix={anchorPrefix}
+                                showText={message.kind === "image" || message.kind === "url"}
+                                textLabel={
+                                    message.kind === "image" ? "Text extracted from image"
+                                        : message.result?.source_title
+                                            ? `Article: ${message.result.source_title}`
+                                            : "Article text from the link"
+                                }
+                                onDiscuss={onDiscuss ? idx => onDiscuss(message.result, idx) : undefined}
+                            />
+                            <CheckActions result={message.result} signedIn={signedIn} />
+                        </>
                     )}
                 </div>
                 {message.status !== "loading" && (
@@ -384,12 +376,13 @@ function forgetGuestThread() {
 
 // A stored check (from /conversations/{id}) as the two chat bubbles it was.
 function turnToMessages(turn) {
-    const kind = turn.kind === "image" ? "image" : "text";
+    const kind = turn.kind === "image" || turn.kind === "url" ? turn.kind : "text";
     const submitted = parseServerTime(turn.submitted_at);
     return [
         {
             id: `a${turn.id}-user`, role: "user", kind,
-            text: turn.text || turn.text_preview || "",
+            text: kind === "url" ? turn.url || "" : turn.text || turn.text_preview || "",
+            title: turn.source_title || null,
             fileName: "Image submission",
             expanded: false, timestamp: submitted,
         },
@@ -398,10 +391,99 @@ function turnToMessages(turn) {
             status: turn.status === "completed" ? "done" : turn.status === "failed" ? "error" : "loading",
             stage: turn.stage || "queued",
             result: turn,
-            error: turn.status === "failed" ? "Verification failed for this check." : undefined,
+            error: turn.status === "failed" ? turn.error || "Verification failed for this check." : undefined,
             timestamp: parseServerTime(turn.verdict?.created_at) || submitted,
         },
     ];
+}
+
+export function focusLabel(result, claimIndex) {
+    const v = result?.verdict;
+    if (!v) return "this check";
+    if (claimIndex == null) {
+        return `the verdict (${(VERDICT_META[v.verdict] || VERDICT_META.uncertain).label.toLowerCase()})`;
+    }
+    const claim = v.claim_verdicts?.[claimIndex]?.claim || "";
+    const short = claim.length > 70 ? `${claim.slice(0, 67)}…` : claim;
+    return `claim ${claimIndex + 1}, “${short}”`;
+}
+
+function answerFromServer(q) {
+    return { answer: q.answer, citations: q.citations, mode: q.mode, checks: q.checks || [] };
+}
+
+// A stored chat message as its two bubbles.
+function questionToMessages(q, resultsById) {
+    const t = parseServerTime(q.created_at);
+    const status = q.status === "done" || !q.status ? "done" : q.status === "failed" ? "error" : "loading";
+    return [
+        {
+            id: `q${q.id}-user`, role: "user", kind: "question", text: q.question, timestamp: t,
+            focusLabel: q.focus ? focusLabel(resultsById[q.focus.article_id], q.focus.claim_index) : null,
+        },
+        {
+            id: `q${q.id}-assistant`, chatMessageId: q.id, role: "assistant", kind: "answer",
+            status, stage: q.stage, error: q.error || "Couldn't reply. Please try again.",
+            answer: answerFromServer(q), timestamp: t,
+        },
+    ];
+}
+
+function detailToMessages(detail) {
+    const resultsById = {};
+    detail.turns.forEach(t => { resultsById[t.id] = t; });
+    (detail.questions || []).forEach(q => (q.checks || []).forEach(c => { resultsById[c.id] = c; }));
+    const pairs = [
+        ...detail.turns.map(turnToMessages),
+        ...(detail.questions || []).map(q => questionToMessages(q, resultsById)),
+    ];
+    pairs.sort((a, b) => a[0].timestamp - b[0].timestamp);
+    return pairs.flat();
+}
+
+// Long text, links and images start a new check; short messages talk to the assistant.
+function routeFor(text, { canChat, focus, forced }) {
+    if (!canChat) return "check";
+    if (forced) return forced;
+    if (focus) return "chat";
+    if (isLink(text)) return "check";
+    const sentences = (text.match(/[.!?।](\s|$)/g) || []).length;
+    if (text.length > 280 || sentences >= 3) return "check";
+    return "chat";
+}
+
+const FOLLOW_UPS = [
+    "What's your verdict, and why?",
+    "Which source is the most reliable here?",
+    "What would change this verdict?",
+];
+
+function ComposerHelper({ focus, onClearFocus, route, hasInput, onFlipRoute, showFollowUps, onFollowUp }) {
+    return (
+        <div className="composer-helper">
+            {focus && (
+                <div className="chat-focus-chip">
+                    <span>Discussing {focus.label}</span>
+                    <button type="button" onClick={onClearFocus} aria-label="Stop discussing this finding">×</button>
+                </div>
+            )}
+            {!focus && showFollowUps && !hasInput && (
+                <div className="chat-follow-ups">
+                    {FOLLOW_UPS.map(f => (
+                        <button key={f} type="button" className="chat-suggestion" onClick={() => onFollowUp(f)}>{f}</button>
+                    ))}
+                </div>
+            )}
+            {route && hasInput && (
+                <div className="chat-route-hint">
+                    {route === "chat" ? "Replying in this chat" : "Running a new check"}
+                    <button type="button" className="check-link-btn" onClick={onFlipRoute}>
+                        {route === "chat" ? "check it as a new article instead" : "reply in chat instead"}
+                    </button>
+                </div>
+            )}
+        </div>
+    );
 }
 
 function SignInGate() {
@@ -440,6 +522,10 @@ export default function VerifyPage() {
     const [historyOpen, setHistoryOpen] = useState(false);
     const [loadingChat, setLoadingChat] = useState(false);
     const [guestRemaining, setGuestRemaining] = useState(null);
+    // The finding the next message is about: {article_id, claim_index, label}
+    const [focus, setFocus] = useState(null);
+    // Manual override of automatic routing for the current draft: "chat" | "check" | null
+    const [forcedRoute, setForcedRoute] = useState(null);
 
     const threadEndRef = useRef(null);
     const previewUrlsRef = useRef([]);
@@ -507,8 +593,20 @@ export default function VerifyPage() {
     const showConversation = useCallback((detail) => {
         const token = ++viewTokenRef.current;
         setActiveConversation(detail.id);
-        const msgs = detail.turns.flatMap(turnToMessages);
+        const msgs = detailToMessages(detail);
         setMessages(msgs);
+        setFocus(null);
+        // Resume replies still being written (e.g. after a refresh).
+        msgs.filter(m => m.kind === "answer" && m.status === "loading").forEach(m => {
+            pollChatMessage(detail.id, m.chatMessageId, {
+                onUpdate: d => viewTokenRef.current === token &&
+                    updateAssistant(m.id, { stage: d.stage, answer: answerFromServer(d) }),
+            })
+                .then(d => viewTokenRef.current === token &&
+                    updateAssistant(m.id, { status: "done", answer: answerFromServer(d) }))
+                .catch(err => viewTokenRef.current === token &&
+                    updateAssistant(m.id, { status: "error", error: errorMessage(err, "Couldn't reply.") }));
+        });
         msgs.filter(m => m.role === "assistant" && m.status === "loading").forEach(m => {
             pollVerification(m.articleId, {
                 onStage: stage => viewTokenRef.current === token && updateAssistant(m.id, { stage }),
@@ -546,6 +644,8 @@ export default function VerifyPage() {
         setInput("");
         setAttachError("");
         setHistoryOpen(false);
+        setFocus(null);
+        setForcedRoute(null);
     }, [sending, setActiveConversation]);
 
     // Once auth is known: signed out → ask how many free checks are left;
@@ -636,6 +736,7 @@ export default function VerifyPage() {
                 },
             });
             updateAssistant(assistantId, { status: "done", result: data });
+            if (kind === "url" && data.source_title) updateAssistant(userId, { title: data.source_title });
             if (signedIn) refreshConversations();
             return true;
         } catch (err) {
@@ -653,17 +754,82 @@ export default function VerifyPage() {
         }
     };
 
+    const handleChat = async (text) => {
+        const convId = conversationIdRef.current;
+        if (!convId) return;
+        const sentFocus = focus;
+        const turnId = `${Date.now()}`;
+        const userId = `${turnId}-user`;
+        const assistantId = `${turnId}-assistant`;
+        const token = viewTokenRef.current;
+        const timestamp = Date.now();
+        setAttachError("");
+        setFocus(null);
+        setMessages(prev => [
+            ...prev,
+            { id: userId, role: "user", kind: "question", text, timestamp, focusLabel: sentFocus?.label || null },
+            { id: assistantId, role: "assistant", kind: "answer", status: "loading", stage: "thinking", timestamp },
+        ]);
+        setSending(true);
+        try {
+            const { data } = await sendChatMessage(
+                convId, text,
+                sentFocus ? { article_id: sentFocus.article_id, claim_index: sentFocus.claim_index } : null
+            );
+            const done = await pollChatMessage(convId, data.id, {
+                onUpdate: d => viewTokenRef.current === token &&
+                    updateAssistant(assistantId, { stage: d.stage, chatMessageId: d.id, answer: answerFromServer(d) }),
+            });
+            if (viewTokenRef.current === token) {
+                updateAssistant(assistantId, { status: "done", answer: answerFromServer(done), timestamp: Date.now() });
+            }
+            refreshConversations();
+            return true;
+        } catch (err) {
+            if (err?.response?.status === 409 || err?.response?.status === 422) {
+                // Not sent: put the draft back.
+                setMessages(prev => prev.filter(m => m.id !== userId && m.id !== assistantId));
+                setAttachError(errorMessage(err, "Couldn't send that."));
+                setFocus(sentFocus);
+                return false;
+            }
+            updateAssistant(assistantId, {
+                status: "error",
+                error: errorMessage(err, "Couldn't reply. Please try again."),
+            });
+            return true;
+        } finally {
+            setSending(false);
+        }
+    };
+
     const handleSend = async () => {
         const text = input.trim();
         if (!text || sending || gated) return;
+        const route = routeFor(text, { canChat, focus, forced: forcedRoute });
         setInput("");
+        setForcedRoute(null);
+        if (route === "chat") {
+            if (!(await handleChat(text))) setInput(text);
+            return;
+        }
+        setFocus(null);
+        const link = isLink(text);
         const accepted = await runCheck({
             userMsg: { text },
-            kind: "text",
+            kind: link ? "url" : "text",
             submit: opts => verifyArticle(text, opts),
-            fallbackError: "Failed to verify article.",
+            fallbackError: link ? "Failed to check that link." : "Failed to verify article.",
         });
         if (!accepted) setInput(text);
+    };
+
+    // "Discuss" on a claim (index) or a whole verdict (null).
+    const handleDiscuss = (result, claimIndex) => {
+        if (!result?.id) return;
+        setFocus({ article_id: result.id, claim_index: claimIndex, label: focusLabel(result, claimIndex) });
+        setForcedRoute(null);
+        composerRef.current?.focus();
     };
 
     const handleImageSelect = async (file) => {
@@ -700,6 +866,13 @@ export default function VerifyPage() {
     };
 
     const activeTitle = conversations.find(c => c.id === conversationId)?.title;
+    // Talking to the assistant needs a saved chat with at least one finished check.
+    const canChat = !!user && !!conversationId &&
+        messages.some(m => m.role === "assistant" && m.kind !== "answer" && m.status === "done");
+    const draft = input.trim();
+    const route = draft ? routeFor(draft, { canChat, focus, forced: forcedRoute }) : null;
+    const lastMsg = messages[messages.length - 1];
+    const showFollowUps = canChat && lastMsg?.role === "assistant" && lastMsg.status === "done";
 
     return (
         <>
@@ -798,24 +971,33 @@ export default function VerifyPage() {
                     ) : (
                         <div className="chat-thread">
                             <AnimatePresence initial={false}>
-                                {messages.map(m => (
-                                    <motion.div
-                                        key={m.id}
-                                        initial={{ opacity: 0, y: 12 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ duration: 0.3, ease: "easeOut" }}
-                                    >
-                                        {m.role === "user" ? (
-                                            <UserBubble
-                                                message={m}
-                                                expanded={m.expanded}
-                                                onToggleExpand={() => toggleExpand(m.id)}
-                                            />
-                                        ) : (
-                                            <AssistantBubble message={m} />
-                                        )}
-                                    </motion.div>
-                                ))}
+                                {messages.map((m, idx) => {
+                                    const reply = m.role === "user" ? messages[idx + 1] : null;
+                                    return (
+                                        <motion.div
+                                            key={m.id}
+                                            initial={{ opacity: 0, y: 12 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            transition={{ duration: 0.3, ease: "easeOut" }}
+                                        >
+                                            {m.role === "user" ? (
+                                                <UserBubble
+                                                    message={m}
+                                                    expanded={m.expanded}
+                                                    onToggleExpand={() => toggleExpand(m.id)}
+                                                    claimVerdicts={reply?.result?.verdict?.claim_verdicts}
+                                                    anchorPrefix={reply ? `m${reply.id}` : undefined}
+                                                />
+                                            ) : (
+                                                <AssistantBubble
+                                                    message={m}
+                                                    signedIn={!!user}
+                                                    onDiscuss={canChat ? handleDiscuss : undefined}
+                                                />
+                                            )}
+                                        </motion.div>
+                                    );
+                                })}
                             </AnimatePresence>
                             <div ref={threadEndRef} />
                         </div>
@@ -827,6 +1009,19 @@ export default function VerifyPage() {
                         <SignInGate />
                     ) : (
                         <ChatComposer
+                            topSlot={
+                                canChat && (
+                                    <ComposerHelper
+                                        focus={focus}
+                                        onClearFocus={() => setFocus(null)}
+                                        route={route}
+                                        hasInput={!!draft}
+                                        onFlipRoute={() => setForcedRoute(route === "chat" ? "check" : "chat")}
+                                        showFollowUps={showFollowUps}
+                                        onFollowUp={f => { setInput(f); composerRef.current?.focus(); }}
+                                    />
+                                )
+                            }
                             ref={composerRef}
                             value={input}
                             onChange={setInput}
@@ -834,9 +1029,13 @@ export default function VerifyPage() {
                             onImageSelect={handleImageSelect}
                             disabled={sending || loadingChat}
                             placeholder={
-                                messages.length > 0
-                                    ? "Ask a follow-up, or paste another article..."
-                                    : "Paste article content, or attach a photo of one..."
+                                focus
+                                    ? "Ask about it, push back, or ask for my verdict…"
+                                    : canChat
+                                        ? "Ask about these findings, push back on one, or paste something new to check…"
+                                        : messages.length > 0
+                                            ? "Paste another article or link to check..."
+                                            : "Paste an article or a link, or attach a photo of one..."
                             }
                         />
                     )}

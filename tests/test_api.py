@@ -454,3 +454,335 @@ def test_model_registry_top_n(client):
     assert resp.status_code == 200
     models = resp.json()["models"]
     assert len(models) <= 3
+
+
+# ── Check a link ───────────────────────────────────────────────────────────────
+
+def _vr_with_evidence():
+    from paper_trail_core.agents.pipeline import VerdictResult
+    claim = {
+        "claim": "The Eiffel Tower is in Paris.", "verdict": "entailment", "confidence": 0.9,
+        "evidence_snippets": ["The Eiffel Tower is a wrought-iron tower in Paris, France."],
+        "sources": ["wikipedia.org"], "urls": ["https://en.wikipedia.org/wiki/Eiffel_Tower"],
+        "published_at": [""], "trust": [0.8],
+    }
+    return VerdictResult(verdict="likely_real", confidence=0.9, claim_verdicts=[claim],
+                         ensemble_score=0.8, reasoning_trace="trace")
+
+
+def test_link_check_fetches_then_verifies(client):
+    from api.url_fetch import FetchedArticle
+    alice = _signup(client, "linker")
+    page = FetchedArticle(url="https://news.example.com/story",
+                          title="Tower story", text="The Eiffel Tower is in Paris. " * 20)
+    with patch("api.routers.articles.fetch_article", return_value=page) as fetch, \
+         patch("api.routers.articles.run_verification_pipeline", return_value=_vr_with_evidence()) as run:
+        # a bare link in the text box counts as a link check
+        resp = client.post("/articles/submit", json={"text": "https://news.example.com/story"}, headers=alice)
+    assert resp.status_code == 202 and resp.json()["kind"] == "url"
+    fetch.assert_called_once_with("https://news.example.com/story")
+    assert run.call_args.args[0].startswith("The Eiffel Tower")
+
+    done = client.get(f"/articles/{resp.json()['id']}", headers=alice).json()
+    assert done["status"] == "completed"
+    assert done["source_title"] == "Tower story"
+    assert done["full_text"].startswith("The Eiffel Tower")
+    cv = done["verdict"]["claim_verdicts"][0]
+    assert cv["urls"] == ["https://en.wikipedia.org/wiki/Eiffel_Tower"] and cv["trust"] == [0.8]
+
+
+def test_link_check_reports_why_fetch_failed(client):
+    from api.url_fetch import FetchError
+    alice = _signup(client, "linkfail")
+    with patch("api.routers.articles.fetch_article", side_effect=FetchError("The page needs a login.")), \
+         patch("api.routers.articles.run_verification_pipeline") as run:
+        resp = client.post("/articles/submit", json={"url": "https://paywalled.example.com/x"}, headers=alice)
+    run.assert_not_called()
+    done = client.get(f"/articles/{resp.json()['id']}", headers=alice).json()
+    assert done["status"] == "failed" and done["error"] == "The page needs a login."
+
+
+def test_non_http_links_are_rejected(client):
+    alice = _signup(client, "badlink")
+    resp = client.post("/articles/submit", json={"url": "file:///etc/passwd"}, headers=alice)
+    assert resp.status_code == 422
+
+
+def test_url_guard_blocks_private_addresses():
+    from api.url_fetch import FetchError, validate_url
+    for bad in ("http://127.0.0.1/", "http://localhost:8000/", "http://169.254.169.254/latest",
+                "http://10.0.0.5/", "ftp://example.com/", "http://user:pw@example.com/"):
+        with pytest.raises(FetchError):
+            validate_url(bad)
+
+
+def test_fallback_extractor_reads_paragraphs():
+    from api.url_fetch import _FallbackParser
+    html = ("<html><head><title>T</title><meta property='og:title' content='Real title'></head>"
+            "<body><nav><p>Menu menu menu menu menu menu menu menu menu menu</p></nav>"
+            "<p>" + "Body sentence about the event. " * 3 + "</p>"
+            "<script>var x = 'not text';</script></body></html>")
+    p = _FallbackParser()
+    p.feed(html)
+    assert p.og_title == "Real title"
+    assert len(p.paragraphs) == 1 and p.paragraphs[0].startswith("Body sentence")
+
+
+# ── Sharing ────────────────────────────────────────────────────────────────────
+
+def test_share_link_is_public_and_revocable(client):
+    alice = _signup(client, "sharer")
+    bob = _signup(client, "notowner")
+    with patch("api.routers.articles.run_verification_pipeline", return_value=_vr_with_evidence()):
+        aid = client.post("/articles/submit", json={"text": SAMPLE_ARTICLE}, headers=alice).json()["id"]
+
+    assert client.post(f"/articles/{aid}/share", headers=bob).status_code == 404
+    share = client.post(f"/articles/{aid}/share", headers=alice).json()
+    assert share["path"] == f"/v/{share['slug']}"
+    # idempotent
+    assert client.post(f"/articles/{aid}/share", headers=alice).json()["slug"] == share["slug"]
+
+    public = client.get(f"/share/{share['slug']}")       # no token
+    assert public.status_code == 200
+    body = public.json()
+    assert body["text"] == SAMPLE_ARTICLE and body["verdict"]["verdict"] == "likely_real"
+    assert "user_id" not in body and "conversation_id" not in body
+
+    assert client.delete(f"/articles/{aid}/share", headers=alice).status_code == 204
+    assert client.get(f"/share/{share['slug']}").status_code == 404
+
+
+# ── Feedback ───────────────────────────────────────────────────────────────────
+
+def test_feedback_is_saved_updated_and_returned(client):
+    alice = _signup(client, "rater")
+    bob = _signup(client, "snoop")
+    with patch("api.routers.articles.run_verification_pipeline", return_value=_vr_with_evidence()):
+        aid = client.post("/articles/submit", json={"text": SAMPLE_ARTICLE}, headers=alice).json()["id"]
+
+    assert client.put(f"/articles/{aid}/feedback", json={"rating": 1}).status_code == 401
+    assert client.put(f"/articles/{aid}/feedback", json={"rating": 1}, headers=bob).status_code == 404
+    assert client.put(f"/articles/{aid}/feedback", json={"rating": 5}, headers=alice).status_code == 422
+
+    ok = client.put(f"/articles/{aid}/feedback", json={"rating": 1}, headers=alice)
+    assert ok.status_code == 200 and ok.json()["rating"] == 1
+    down = client.put(f"/articles/{aid}/feedback",
+                      json={"rating": -1, "reason": "bad_sources", "comment": "old article"},
+                      headers=alice).json()
+    assert down == {"rating": -1, "reason": "bad_sources", "comment": "old article"}
+    assert client.get(f"/articles/{aid}", headers=alice).json()["feedback"]["rating"] == -1
+
+    from api.database import SessionLocal
+    from api.orm import Feedback
+    db = SessionLocal()
+    try:
+        rows = db.query(Feedback).filter(Feedback.article_id == aid).all()
+        assert len(rows) == 1 and rows[0].verdict_at_rating == "likely_real"
+    finally:
+        db.close()
+
+
+# ── Follow-up questions ────────────────────────────────────────────────────────
+
+def test_ask_answers_from_the_chat_with_citations(client):
+    alice = _signup(client, "asker")
+    with patch("api.routers.articles.run_verification_pipeline", return_value=_vr_with_evidence()):
+        conv_id = client.post("/articles/submit", json={"text": SAMPLE_ARTICLE},
+                              headers=alice).json()["conversation_id"]
+
+    def fake_llm(question, ctx, history):
+        assert "[1] (wikipedia.org)" in ctx.text and "Eiffel" in ctx.text
+        return "Wikipedia places the tower in Paris [1]."
+
+    from config import settings
+    with patch.object(settings, "ANTHROPIC_API_KEY", "sk-ant-test"), \
+         patch.object(settings, "LLM_PROVIDER", "anthropic"), \
+         patch("api.qa._ask_anthropic", side_effect=fake_llm):
+        resp = client.post(f"/conversations/{conv_id}/ask",
+                           json={"question": "Why is claim 1 supported?"}, headers=alice)
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["mode"] == "llm" and "[1]" in body["answer"]
+    assert body["citations"][0]["url"] == "https://en.wikipedia.org/wiki/Eiffel_Tower"
+
+    detail = client.get(f"/conversations/{conv_id}", headers=alice).json()
+    assert [q["question"] for q in detail["questions"]] == ["Why is claim 1 supported?"]
+
+
+def test_ask_without_llm_falls_back_to_evidence(client):
+    alice = _signup(client, "nollm")
+    with patch("api.routers.articles.run_verification_pipeline", return_value=_vr_with_evidence()):
+        conv_id = client.post("/articles/submit", json={"text": SAMPLE_ARTICLE},
+                              headers=alice).json()["conversation_id"]
+    from config import settings
+    with patch.object(settings, "ANTHROPIC_API_KEY", None), \
+         patch.object(settings, "LLM_PROVIDER", "anthropic"):
+        body = client.post(f"/conversations/{conv_id}/ask",
+                           json={"question": "Where is the Eiffel Tower?"}, headers=alice).json()
+    assert body["mode"] == "extractive"
+    assert body["citations"] and "wrought-iron" in body["citations"][0]["snippet"]
+
+
+def test_ask_is_private(client):
+    alice = _signup(client, "private")
+    bob = _signup(client, "intruder")
+    with patch("api.routers.articles.run_verification_pipeline", return_value=_vr_with_evidence()):
+        conv_id = client.post("/articles/submit", json={"text": SAMPLE_ARTICLE},
+                              headers=alice).json()["conversation_id"]
+    assert client.post(f"/conversations/{conv_id}/ask", json={"question": "hi there"},
+                       headers=bob).status_code == 404
+
+
+# ── Chat continuity ────────────────────────────────────────────────────────────
+
+def test_route_message_rules():
+    from api.chat import route_message
+    assert route_message("Is it true that the tower was finished in 1887?") == \
+        ("verify", "The tower was finished in 1887.")
+    assert route_message("Actually the BBC reported it opened in 1887 instead")[0] == "verify"
+    assert route_message("Why is claim 2 contradicted?")[0] == "answer"
+    assert route_message("Which source is most reliable?")[0] == "answer"
+    assert route_message("So what's your verdict?")[0] == "verdict"
+
+
+def _chat_setup(client, name):
+    user = _signup(client, name)
+    with patch("api.routers.articles.run_verification_pipeline", return_value=_vr_with_evidence()):
+        first = client.post("/articles/submit", json={"text": SAMPLE_ARTICLE}, headers=user).json()
+    return user, first["conversation_id"], first["id"]
+
+
+def _pushback_vr():
+    from paper_trail_core.agents.pipeline import VerdictResult
+    claim = {
+        "claim": "The Eiffel Tower was completed in 1887.", "verdict": "contradiction",
+        "confidence": 0.85, "evidence_snippets": ["The tower was completed in March 1889."],
+        "sources": ["britannica.com"], "urls": ["https://www.britannica.com/topic/Eiffel-Tower"],
+        "published_at": [""], "trust": [0.9],
+    }
+    return VerdictResult(verdict="likely_fake", confidence=0.85, claim_verdicts=[claim],
+                         ensemble_score=0.3, reasoning_trace="t")
+
+
+def _no_llm():
+    from config import settings
+    return patch.object(settings, "ANTHROPIC_API_KEY", None)
+
+
+def test_pushback_runs_a_new_check_and_continues_the_chat(client):
+    user, conv_id, first_id = _chat_setup(client, "pusher")
+
+    with _no_llm(), patch("api.routers.articles.run_verification_pipeline",
+                          return_value=_pushback_vr()) as run:
+        sent = client.post(f"/conversations/{conv_id}/messages",
+                           json={"message": "But I read it was completed in 1887, not 1889",
+                                 "focus": {"article_id": first_id, "claim_index": 0}},
+                           headers=user)
+    assert sent.status_code == 202 and sent.json()["status"] == "pending"
+    run.assert_called_once()
+    # "But I read it was…" is turned into a self-contained claim about the focused finding
+    assert run.call_args.args[0] == "The Eiffel Tower was completed in 1887, not 1889."
+
+    reply = client.get(f"/conversations/{conv_id}/messages/{sent.json()['id']}", headers=user).json()
+    assert reply["status"] == "done" and reply["mode"] == "heuristic"
+    assert "likely misinformation" in reply["answer"].lower()
+    assert reply["focus"] == {"article_id": first_id, "claim_index": 0}
+    assert len(reply["checks"]) == 1 and reply["checks"][0]["kind"] == "chat"
+    assert reply["citations"][0]["url"] == "https://www.britannica.com/topic/Eiffel-Tower"
+
+    detail = client.get(f"/conversations/{conv_id}", headers=user).json()
+    # the assistant's check lives in the message, not in the user's list of checks
+    assert [t["id"] for t in detail["turns"]] == [first_id]
+    assert detail["questions"][0]["checks"][0]["verdict"]["verdict"] == "likely_fake"
+
+    # continuity: the next reply can draw on evidence from the check run above
+    with _no_llm():
+        nxt = client.post(f"/conversations/{conv_id}/messages",
+                          json={"message": "Which source says when it was completed?"},
+                          headers=user).json()
+    nxt = client.get(f"/conversations/{conv_id}/messages/{nxt['id']}", headers=user).json()
+    assert any("britannica" in c["source"] for c in nxt["citations"])
+
+
+def test_focused_verdict_request(client):
+    user, conv_id, first_id = _chat_setup(client, "verdicter")
+    with _no_llm():
+        sent = client.post(f"/conversations/{conv_id}/messages",
+                           json={"message": "What's your verdict on this one?",
+                                 "focus": {"article_id": first_id, "claim_index": 0}},
+                           headers=user).json()
+    reply = client.get(f"/conversations/{conv_id}/messages/{sent['id']}", headers=user).json()
+    assert reply["answer"].startswith("My verdict on this finding: **Supported**")
+    assert "Eiffel Tower is in Paris" in reply["answer"]
+
+
+def test_chat_focus_must_be_in_this_chat_and_chat_is_private(client):
+    user, conv_id, _ = _chat_setup(client, "owner1")
+    other, _, other_article = _chat_setup(client, "owner2")
+    assert client.post(f"/conversations/{conv_id}/messages",
+                       json={"message": "hi", "focus": {"article_id": other_article}},
+                       headers=user).status_code == 404
+    assert client.post(f"/conversations/{conv_id}/messages", json={"message": "hi"},
+                       headers=other).status_code == 404
+    assert client.post(f"/conversations/{conv_id}/messages",
+                       json={"message": "hi"}).status_code == 401
+
+
+class _Block:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+class _Resp:
+    def __init__(self, stop_reason, content):
+        self.stop_reason, self.content, self.stop_details = stop_reason, content, None
+
+
+def test_llm_tool_loop_runs_verify_and_cites_new_evidence(client, monkeypatch):
+    import sys, types
+    user, conv_id, first_id = _chat_setup(client, "llmuser")
+
+    calls = []
+    script = [
+        _Resp("tool_use", [_Block(type="text", text="Let me check that."),
+                           _Block(type="tool_use", id="tu1", name="verify_claim",
+                                  input={"statement": "The Eiffel Tower was completed in 1887."})]),
+        _Resp("end_turn", [_Block(type="text",
+                                  text="That's contradicted: it was completed in 1889 [2]. "
+                                       "My verdict stands: Supported for the original claim [1].")]),
+    ]
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            # snapshot: the loop keeps appending to the same messages list
+            calls.append({**kwargs, "messages": list(kwargs["messages"])})
+            return script[len(calls) - 1]
+
+    class FakeClient:
+        def __init__(self, **kw):
+            self.beta = types.SimpleNamespace(messages=FakeMessages())
+            self.messages = FakeMessages()
+
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=FakeClient))
+    from config import settings
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "anthropic")
+
+    with patch("api.routers.articles.run_verification_pipeline", return_value=_pushback_vr()):
+        sent = client.post(f"/conversations/{conv_id}/messages",
+                           json={"message": "I heard it was finished in 1887?",
+                                 "focus": {"article_id": first_id, "claim_index": 0}},
+                           headers=user).json()
+    reply = client.get(f"/conversations/{conv_id}/messages/{sent['id']}", headers=user).json()
+
+    assert reply["mode"] == "llm" and reply["status"] == "done"
+    assert [c["n"] for c in reply["citations"]] == [1, 2]
+    assert reply["citations"][1]["source"] == "britannica.com"
+    assert len(reply["checks"]) == 1
+    # the model saw the focus, the tool, and got the tool result back
+    first_prompt = calls[0]["messages"][-1]["content"]
+    assert "<focus>" in first_prompt and "Claim 1.1" in first_prompt
+    assert calls[0]["tools"][0]["name"] == "verify_claim"
+    tool_result = calls[1]["messages"][-1]["content"][0]
+    assert tool_result["type"] == "tool_result" and tool_result["tool_use_id"] == "tu1"
+    assert '"overall_verdict": "likely misinformation"' in tool_result["content"]

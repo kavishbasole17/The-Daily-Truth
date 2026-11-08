@@ -142,6 +142,42 @@ export const deleteConversation = id => api.delete(`/conversations/${id}`);
 export const claimGuestChecks = articleIds =>
     api.post("/conversations/claim", { article_ids: articleIds });
 
+// Answered by an LLM from the chat's own evidence, which can take a while.
+export const askQuestion = (conversationId, question) =>
+    api.post(`/conversations/${conversationId}/ask`, { question }, { timeout: 180000 });
+
+// ── Conversational follow-ups ───────────────────────────────────────────────
+// The reply is produced in the background (it may run new checks), so this is
+// the same submit-then-poll shape as verification.
+export const sendChatMessage = (conversationId, message, focus = null) =>
+    api.post(`/conversations/${conversationId}/messages`, { message, ...(focus ? { focus } : {}) });
+
+export const getChatMessage = (conversationId, messageId) =>
+    api.get(`/conversations/${conversationId}/messages/${messageId}`);
+
+/** Poll a chat reply until it's done; `onUpdate` sees each intermediate state. */
+export const pollChatMessage = async (conversationId, messageId, { onUpdate, intervalMs = 1500, timeoutMs = 300000 } = {}) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const { data } = await getChatMessage(conversationId, messageId);
+        onUpdate?.(data);
+        if (data.status === "done") return data;
+        if (data.status === "failed") throw new Error(data.error || "Couldn't reply. Please try again.");
+        await new Promise(r => setTimeout(r, intervalMs));
+    }
+    throw new Error("The reply is taking too long. Please try again.");
+};
+
+// ── Sharing + feedback ──────────────────────────────────────────────────────
+export const shareArticle = id => api.post(`/articles/${id}/share`);
+export const unshareArticle = id => api.delete(`/articles/${id}/share`);
+export const getSharedCheck = slug => api.get(`/share/${encodeURIComponent(slug)}`);
+export const rateArticle = (id, { rating, reason = null, comment = null }) =>
+    api.put(`/articles/${id}/feedback`, { rating, reason, comment });
+
+/** A single http(s) link with nothing else around it — checked as a link. */
+export const isLink = value => /^https?:\/\/\S+$/i.test((value || "").trim());
+
 // ── Agentic verification pipeline (evidence-grounded) ──────────────────────
 // Submission is asynchronous: POST returns 202 with status="processing" and the
 // verdict arrives later. The pipeline retrieves live evidence and runs a

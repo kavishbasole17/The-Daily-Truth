@@ -8,6 +8,7 @@ Setup:
 Existing endpoints (unchanged):
     GET  /                         API info
     GET  /health                   Health + loaded model counts
+    GET  /health/accuracy          Is every verification stage at full accuracy? (?deep=true)
     GET  /models                   All available models with metrics
     POST /predict                  Classify with a single named model
     POST /predict/all              Classify with every model + majority-vote consensus
@@ -27,6 +28,10 @@ New endpoints (agentic pipeline + persistence):
     GET  /articles/{id}            Retrieve stored article + verdict
     GET  /conversations            Signed-in user's chat history          [auth required]
     GET  /conversations/{id}       One chat with all its checks            [auth required]
+    POST /conversations/{id}/messages  Talk about the chat's findings; may run new checks
+    POST /conversations/{id}/ask   (legacy) follow-up answered from the chat's evidence only
+    POST /articles/{id}/share      Public read-only link -> GET /share/{slug}
+    PUT  /articles/{id}/feedback   Rate a verdict (+1 / -1 with a reason)   [auth required]
     GET  /models/registry          Benchmark data from registry.json
 """
 
@@ -61,6 +66,7 @@ from api.routers import auth as auth_router
 from api.routers import articles as articles_router
 from api.routers import model_registry as reg_router
 from api.routers import conversations as conversations_router
+from api.routers import share as share_router
 from api.auth import seed_users
 
 logging.basicConfig(
@@ -127,6 +133,10 @@ async def lifespan(app: FastAPI):
                 f'Could not warm verification models: {e}. The pipeline will '
                 'load them on first use, or degrade and say so.'
             )
+
+    # Say loudly, at startup, if any stage will run below full accuracy.
+    from api.accuracy import log_report
+    log_report(deep=bool(getattr(settings, 'WARM_MODELS', True)))
     yield
 
 
@@ -159,6 +169,7 @@ app.include_router(auth_router.router)
 app.include_router(articles_router.router)
 app.include_router(reg_router.router)
 app.include_router(conversations_router.router)
+app.include_router(share_router.router)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -197,6 +208,20 @@ async def health() -> HealthResponse:
         dl_loaded=registry.dl_count,
         hybrid_loaded=registry.hybrid_count,
     )
+
+
+@app.get('/health/accuracy', tags=['Info'])
+def health_accuracy(deep: bool = False) -> dict[str, Any]:
+    """
+    Is every verification stage running at full strength right now?
+
+    Per stage: what is actually running, whether that is full accuracy, and the
+    exact fix if not. `deep=true` also loads the NLI model, sentence encoder and
+    style ensemble to prove they work (slow on first call). No secrets are
+    returned — only whether keys are set.
+    """
+    from api.accuracy import accuracy_report
+    return accuracy_report(deep=deep)
 
 
 # ── Models ────────────────────────────────────────────────────────────────────

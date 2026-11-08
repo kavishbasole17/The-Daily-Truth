@@ -284,6 +284,9 @@ def aggregate_claim(
         top_relevance=round(top_relevance, 4),
         numeric_conflict=round(max_numeric, 4),
         sources=[s.get("domain", "") for s in snippets],
+        urls=[s.get("url", "") or "" for s in snippets],
+        published_at=[s.get("published_at", "") or "" for s in snippets],
+        trust=[round(float(s.get("trust", 0.0) or 0.0), 3) for s in snippets],
         status=status,
         in_region=[bool(s.get("in_region")) for s in snippets],
     )

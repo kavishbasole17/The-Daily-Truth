@@ -34,6 +34,9 @@ class ClaimVerdict(TypedDict, total=False):
     top_relevance: float            # best claim<->snippet cosine after gating
     numeric_conflict: float         # in [0, 1]; see paper_trail_core/nlp/numeric.py
     sources: list[str]              # domains, positionally parallel to evidence_snippets
+    urls: list[str]                 # article links, parallel to evidence_snippets ("" if none)
+    published_at: list[str]         # publish timestamps as the provider gave them ("" if unknown)
+    trust: list[float]              # source trust weight in [0, 1], parallel to evidence_snippets
     in_region: list[bool]           # parallel to evidence_snippets: from the claim's region
     location: Optional[dict[str, Any]]   # where the claim is about, if the locator found one
     search_scope: Optional[str]     # widest/narrowest region searched, e.g. "Pune, Maharashtra"

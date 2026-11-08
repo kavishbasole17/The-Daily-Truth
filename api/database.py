@@ -52,6 +52,16 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "conversation_id": "INTEGER",
         "guest_key": "VARCHAR(128)",
         "kind": "VARCHAR(16)",
+        "source_title": "VARCHAR(300)",
+        "error_message": "TEXT",
+        "share_slug": "VARCHAR(32)",
+    },
+    "chat_questions": {
+        "status": "VARCHAR(16)",
+        "stage": "VARCHAR(16)",
+        "focus": "TEXT",
+        "article_ids": "TEXT",
+        "error_message": "TEXT",
     },
     "verdicts": {"degradations": "TEXT", "fused_score": "FLOAT"},
 }

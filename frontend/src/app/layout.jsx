@@ -8,11 +8,14 @@ import "@/styles/pages.css";
 import "@/styles/chat.css";
 import "@/styles/footer.css";
 import "@/styles/auth.css";
+import "@/styles/features.css";
 
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { AuthProvider } from "@/context/AuthContext";
 
 export const metadata = {
+    // Absolute base for OpenGraph image URLs on shared verdict pages.
+    metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"),
     title: "The Daily Truth",
     description: "AI Powered Fake News Detection"
 };

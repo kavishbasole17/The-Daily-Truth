@@ -50,13 +50,14 @@ except ImportError:  # pragma: no cover
 from paper_trail_core.agents.state import PipelineState
 from paper_trail_core.degradations import degrade
 from paper_trail_core.nlp.lang_id import SUPPORTED_LANGUAGES, detect_language
+from paper_trail_core.nlp.llm import complete_json
 
 log = logging.getLogger(__name__)
 
-# Cost/latency cap on what gets sent to the LLM per translation call — the
-# article, not a claim, so larger than claim_extractor's 4000-char cap, but
-# still bounded. A truncated translation is flagged, not silent.
-TRANSLATE_MAX_CHARS = 8000
+# Matches the pipeline's MAX_ARTICLE_CHARS so a long non-English article is
+# translated whole (the old 8000-char cap dropped most of a long article).
+# Anything over it is still flagged as truncated, never silent.
+TRANSLATE_MAX_CHARS = 50_000
 
 _PROMPT = """\
 You are a professional translator. Translate the article below from its \
@@ -77,28 +78,10 @@ Reply with ONLY valid JSON — no markdown, no explanation:
 def _llm_translate(text: str) -> str:
     prompt = _PROMPT.format(text=text[:TRANSLATE_MAX_CHARS])
 
-    if _PROVIDER == "anthropic":
-        from anthropic import Anthropic
-        client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        msg = client.messages.create(
-            model=_MODEL,
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = msg.content[0].text.strip()
-    elif _PROVIDER == "openai":
-        from openai import OpenAI
-        client = OpenAI(api_key=settings.OPENAI_API_KEY)
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-        )
-        raw = resp.choices[0].message.content
-    else:
-        raise ValueError(f"Unknown LLM provider: {_PROVIDER}")
-
-    translation = json.loads(raw)["translation"]
+    # paper_trail_core/nlp/llm.py — reads text blocks only, leaves room for
+    # thinking, and raises on refusal/truncation so a partial translation is
+    # never verified as if it were the whole article.
+    translation = complete_json(prompt, max_tokens=64000).get("translation")
     if not isinstance(translation, str) or not translation.strip():
         raise ValueError("LLM returned an empty or non-string translation")
     return translation

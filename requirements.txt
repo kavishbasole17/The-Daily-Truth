@@ -1,7 +1,7 @@
 # ── Core ML ───────────────────────────────────────────────────────────────────
 pandas>=1.5.0
 numpy>=1.23.0
-scikit-learn>=1.2.0
+scikit-learn==1.7.2         # PINNED: models/ were pickled with 1.7.2; newer versions fail to load gradient_boosting and warn of invalid results
 xgboost>=1.7.0
 lightgbm>=3.3.0
 catboost>=1.1.0
@@ -9,7 +9,7 @@ scipy>=1.9.0
 joblib>=1.2.0
 
 # ── Deep Learning (for LSTM/GRU/CNN models) ───────────────────────────────────
-tensorflow>=2.10.0         # optional — DL models load only if TF is present
+tensorflow>=2.10.0         # REQUIRED for full accuracy: the stacking ensemble uses lstm/gru/cnn/cnn_lstm as base models
 
 # ── NLI verification + evidence relevance (required by the agentic pipeline) ──
 # No longer optional: claim verification runs a real NLI model, and evidence
@@ -69,10 +69,11 @@ langgraph>=0.1.0
 langchain>=0.1.0
 langchain-anthropic>=0.1.0   # optional — real LLM mode
 langchain-openai>=0.0.5      # optional — real LLM mode
-anthropic>=0.20.0            # optional — real LLM mode
+anthropic>=0.40.0            # REQUIRED for full accuracy (claim extraction, translation, chat)
 openai>=1.0.0                # optional — real LLM mode
 tavily-python>=0.2.0         # optional — real search mode
-requests>=2.28.0             # used by SerpAPI search adapter
+requests>=2.28.0             # used by SerpAPI search adapter + link checks
+trafilatura>=1.6.0           # article text extraction for "check a link"
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 pytest>=7.4.0

@@ -10,7 +10,8 @@ const ChatComposer = forwardRef(function ChatComposer({
                                           onSend,
                                           onImageSelect,
                                           disabled,
-                                          placeholder
+                                          placeholder,
+                                          topSlot
                                       }, ref) {
     const textareaRef = useRef(null);
     const fileInputRef = useRef(null);
@@ -66,6 +67,7 @@ const ChatComposer = forwardRef(function ChatComposer({
     return (
         <div className="chat-composer">
             <div className="chat-composer-inset">
+                {topSlot}
                 <div className={`chat-composer-inner ${overLimit ? "over-limit" : ""}`} onPaste={handlePaste}>
                     {onImageSelect && (
                         <>
