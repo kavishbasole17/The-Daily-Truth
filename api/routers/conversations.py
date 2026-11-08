@@ -16,8 +16,7 @@ GET    /conversations/{id}/messages/{mid}  — poll a reply
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -25,9 +24,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from api.auth import get_current_user, guest_key
-from api.database import get_db
-from api.orm import Article, ChatQuestion, Conversation, Verdict
 from api.chat import chat_reply
+from api.database import get_db
+from api.orm import Article, ChatQuestion, Conversation
 from api.qa import answer_question, dumps_citations
 from api.routers.articles import ArticleOut, _build_article_out, _chat_title
 
@@ -40,7 +39,7 @@ class ConversationSummary(BaseModel):
     created_at: str
     updated_at: str
     message_count: int
-    last_verdict: Optional[str] = None
+    last_verdict: str | None = None
 
 
 class ChatTurn(ArticleOut):
@@ -57,7 +56,7 @@ class CitationOut(BaseModel):
 
 class FocusIn(BaseModel):
     article_id: int
-    claim_index: Optional[int] = Field(None, ge=0, description="Omit to discuss the whole verdict")
+    claim_index: int | None = Field(None, ge=0, description="Omit to discuss the whole verdict")
 
 
 class QuestionOut(BaseModel):
@@ -68,15 +67,15 @@ class QuestionOut(BaseModel):
     mode: str                     # llm | extractive | heuristic
     created_at: str
     status: str = "done"          # pending | thinking | done | failed
-    stage: Optional[str] = None   # thinking | verifying | writing
-    focus: Optional[FocusIn] = None
+    stage: str | None = None   # thinking | verifying | writing
+    focus: FocusIn | None = None
     checks: list[ArticleOut] = [] # checks the assistant ran while replying
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class ChatMessageIn(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
-    focus: Optional[FocusIn] = None
+    focus: FocusIn | None = None
 
 
 class AskRequest(BaseModel):
@@ -101,7 +100,7 @@ class ClaimRequest(BaseModel):
     article_ids: list[int] = Field(..., min_length=1, max_length=20)
 
 
-def _iso(dt: Optional[datetime]) -> str:
+def _iso(dt: datetime | None) -> str:
     return dt.isoformat() if dt else ""
 
 
@@ -120,7 +119,8 @@ def _summary(conv: Conversation) -> ConversationSummary:
         title=conv.title,
         created_at=_iso(conv.created_at),
         updated_at=_iso(conv.updated_at or conv.created_at),
-        message_count=len(conv.articles),
+        # your checks + your follow-up messages (checks the assistant ran belong to those)
+        message_count=sum(1 for a in conv.articles if a.kind != "chat") + len(conv.questions),
         last_verdict=last_verdict,
     )
 
@@ -148,7 +148,7 @@ def _loads(raw, default):
         return default
 
 
-def _question_out(q: ChatQuestion, conv: Optional[Conversation] = None) -> QuestionOut:
+def _question_out(q: ChatQuestion, conv: Conversation | None = None) -> QuestionOut:
     cites = _loads(q.citations, [])
     focus = _loads(q.focus, None)
     ids = _loads(q.article_ids, [])
@@ -355,9 +355,9 @@ def _run_chat_job(question_id: int) -> None:
         q.status, q.stage = "done", None
         conv.updated_at = func.now()
         db.commit()
-    except Exception as exc:
+    except Exception:
         import logging
-        logging.getLogger(__name__).error("chat job %d failed: %s", question_id, exc, exc_info=True)
+        logging.getLogger(__name__).exception("chat job %d failed", question_id)
         db.rollback()
         q = db.get(ChatQuestion, question_id)
         if q is not None:
@@ -394,7 +394,8 @@ def send_message(
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="That finding isn't in this chat.")
     # One reply at a time. A reply stuck for 5+ minutes (e.g. the server
     # restarted mid-job) no longer blocks the chat.
-    stale_before = datetime.utcnow() - timedelta(minutes=5)
+    # created_at is stored as naive UTC (SQLite CURRENT_TIMESTAMP), so compare naive UTC.
+    stale_before = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=5)
     if any(q.status in ("pending", "thinking") and q.created_at and q.created_at > stale_before
            for q in conv.questions):
         raise HTTPException(status.HTTP_409_CONFLICT,

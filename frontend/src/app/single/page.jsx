@@ -16,7 +16,7 @@ import ErrorState from "@/components/ErrorState";
 import EmptyState from "@/components/EmptyState";
 import Footer from "@/components/Footer";
 
-import { predictArticle, getModels } from "@/services/api";
+import { predictArticle, getModels, errorMessage } from "@/services/api";
 
 import "@/styles/pages.css";
 
@@ -37,13 +37,17 @@ export default function SinglePredictionPage() {
                 setAvailableModels(list);
                 if (list.length > 0) setModel(list[0]);
             })
-            .catch(() => {
-                // fallback — user will see error when they submit
+            .catch(err => {
+                setError(errorMessage(err, "Couldn't load the model list. Is the API running?"));
             });
     }, []);
 
     const handleSubmit = async () => {
-        if (!article.trim() || !model) return;
+        if (!article.trim()) return;
+        if (!model) {
+            setError("No model is available. Check that the API is running and models are exported.");
+            return;
+        }
 
         try {
             setLoading(true);
@@ -58,11 +62,8 @@ export default function SinglePredictionPage() {
 
             setResult(data.result);
         } catch (err) {
-            setError(
-                err?.response?.data?.detail ||
-                err?.response?.data?.message ||
-                "Failed to analyze article."
-            );
+            // detail can be a list of validation errors, not a string
+            setError(errorMessage(err, "Failed to analyze article."));
         } finally {
             setLoading(false);
         }

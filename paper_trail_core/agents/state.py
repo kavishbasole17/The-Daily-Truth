@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
 from typing_extensions import TypedDict
 
@@ -38,8 +38,8 @@ class ClaimVerdict(TypedDict, total=False):
     published_at: list[str]         # publish timestamps as the provider gave them ("" if unknown)
     trust: list[float]              # source trust weight in [0, 1], parallel to evidence_snippets
     in_region: list[bool]           # parallel to evidence_snippets: from the claim's region
-    location: Optional[dict[str, Any]]   # where the claim is about, if the locator found one
-    search_scope: Optional[str]     # widest/narrowest region searched, e.g. "Pune, Maharashtra"
+    location: dict[str, Any] | None   # where the claim is about, if the locator found one
+    search_scope: str | None     # widest/narrowest region searched, e.g. "Pune, Maharashtra"
     regional_evidence: int          # how many of the evidence snippets are in-region
     event_corroborated: bool        # recent independent outlets report the same event
     corroborating_sources: list[str]
@@ -49,40 +49,40 @@ class ClaimVerdict(TypedDict, total=False):
 
 class PipelineState(TypedDict):
     article_text: str
-    url: Optional[str]
+    url: str | None
 
     # Input routing. "text" (default, today's only path) skips the OCR node
     # entirely; "image" enters through it. raw_image_ref is a filesystem path
     # to the uploaded image — kept as a path rather than raw bytes so it
     # doesn't get copied through every state dict update.
     input_type: str                     # "text" | "image"
-    raw_image_ref: Optional[str]
+    raw_image_ref: str | None
 
     # Populated by ocr_agent (image input only; None/unset for text input)
-    ocr_text: Optional[str]
-    ocr_confidence: Optional[float]     # 0-1, mean confidence across detected blocks
-    ocr_script: Optional[str]           # detected script, e.g. "Devanagari", "Latin"
+    ocr_text: str | None
+    ocr_confidence: float | None     # 0-1, mean confidence across detected blocks
+    ocr_script: str | None           # detected script, e.g. "Devanagari", "Latin"
 
     # Populated by translation_agent. original_text is the text exactly as
     # received (post-OCR for image input) — never discarded, so a later
     # non-English-aware stage (or a caller inspecting the result) can still see it even
     # after article_text has been overwritten with the English translation.
-    detected_language: Optional[str]        # ISO 639-1, e.g. "en", "hi", "unknown"
-    language_confidence: Optional[float]
-    original_text: Optional[str]
-    translated_text: Optional[str]
-    translation_confidence: Optional[float]
+    detected_language: str | None        # ISO 639-1, e.g. "en", "hi", "unknown"
+    language_confidence: float | None
+    original_text: str | None
+    translated_text: str | None
+    translation_confidence: float | None
 
     # Optional place the caller says the article is about ("Pune", "Kerala").
-    region_hint: Optional[str]
+    region_hint: str | None
 
     # Populated by claim_extractor
     claims: list[str]
 
     # Populated by locator: a place dict (or None) per claim, positionally
     # parallel to `claims`, plus the place the article as a whole is about.
-    claim_locations: list[Optional[dict[str, Any]]]
-    article_location: Optional[dict[str, Any]]
+    claim_locations: list[dict[str, Any] | None]
+    article_location: dict[str, Any] | None
 
     # Populated by evidence_retriever: [{claim, snippets, status}]
     evidence: list[dict[str, Any]]
@@ -109,4 +109,4 @@ class PipelineState(TypedDict):
     # and only the last stage's would survive.
     degradations: Annotated[list[Degradation], operator.add]
 
-    error: Optional[str]
+    error: str | None

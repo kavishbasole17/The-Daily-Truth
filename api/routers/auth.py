@@ -11,16 +11,24 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from api.auth import (
-    _EXPIRE, find_user, get_current_user, get_optional_user, guest_key,
-    guest_limit, guest_queries_used, hash_password, settings, token_for,
-    user_public, _verify_password,
+    _EXPIRE,
+    _verify_password,
+    find_user,
+    get_current_user,
+    get_optional_user,
+    guest_key,
+    guest_limit,
+    guest_queries_used,
+    hash_password,
+    settings,
+    token_for,
+    user_public,
 )
 from api.database import get_db
 from api.orm import User
@@ -41,7 +49,7 @@ class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=32)
     email: str = Field(..., max_length=255)
     password: str = Field(..., min_length=8, max_length=128)
-    full_name: Optional[str] = Field(None, max_length=120)
+    full_name: str | None = Field(None, max_length=120)
 
     @field_validator("username")
     @classmethod
@@ -67,8 +75,8 @@ class GoogleLoginRequest(BaseModel):
 class UserOut(BaseModel):
     id: int
     username: str
-    email: Optional[str] = None
-    full_name: Optional[str] = None
+    email: str | None = None
+    full_name: str | None = None
     role: str
     auth_provider: str
 
@@ -77,7 +85,7 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in_minutes: int
-    user: Optional[UserOut] = None
+    user: UserOut | None = None
 
 
 class GuestStatus(BaseModel):
@@ -145,7 +153,7 @@ def me(user: dict = Depends(get_current_user)) -> UserOut:
 @router.get("/guest", response_model=GuestStatus, summary="Free queries left without signing in")
 def guest_status(
     request: Request,
-    user: Optional[dict] = Depends(get_optional_user),
+    user: dict | None = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ) -> GuestStatus:
     limit = guest_limit()

@@ -39,7 +39,7 @@ import sys
 import time
 import unicodedata
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
@@ -48,7 +48,7 @@ if _ROOT not in sys.path:
 from paper_trail_core.agents.state import PipelineState
 from paper_trail_core.degradations import degrade
 from paper_trail_core.nlp import gazetteer
-from paper_trail_core.nlp.geocoder import GeocoderUnavailable, LEVEL_ORDER, geocode
+from paper_trail_core.nlp.geocoder import LEVEL_ORDER, GeocoderUnavailable, geocode
 
 log = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ def _min_confidence() -> float:
 
 # ── Candidate extraction ──────────────────────────────────────────────────────
 
-_CONNECTORS = frozenset("of de del da la le al el upon".split())
+_CONNECTORS = frozenset(["of", "de", "del", "da", "la", "le", "al", "el", "upon"])
 _WORD = r"[A-Z][A-Za-z'’\-]*"
 _RUN_RE = re.compile(
     rf"(?<![\w'’]){_WORD}(?:\s+(?:(?:of|de|del|da|la|le|al|el|upon)\s+)?{_WORD}){{0,3}}"
@@ -105,13 +105,10 @@ _SITE_WORDS_RE = re.compile(
 )
 # "South Wales", "West Virginia", "North Korea": a country or state name directly
 # after one of these is the tail of a longer name, not the place it spells.
-_NAME_PREFIXES = frozenset("new north south east west northern southern eastern western "
-                           "central upper lower greater great old saint st san los las".split())
-_ORG_SUFFIX = frozenset("ltd inc corp party bank ministry council committee commission "
-                        "association agency authority board".split())
-_HONORIFICS = frozenset("mr mrs ms dr shri smt prof sir madam hon".split())
-_SPEECH_VERBS = frozenset("said says told added stated announced claimed alleged "
-                          "wrote tweeted posted".split())
+_NAME_PREFIXES = frozenset(["new", "north", "south", "east", "west", "northern", "southern", "eastern", "western", "central", "upper", "lower", "greater", "great", "old", "saint", "st", "san", "los", "las"])
+_ORG_SUFFIX = frozenset(["ltd", "inc", "corp", "party", "bank", "ministry", "council", "committee", "commission", "association", "agency", "authority", "board"])
+_HONORIFICS = frozenset(["mr", "mrs", "ms", "dr", "shri", "smt", "prof", "sir", "madam", "hon"])
+_SPEECH_VERBS = frozenset(["said", "says", "told", "added", "stated", "announced", "claimed", "alleged", "wrote", "tweeted", "posted"])
 
 _TLD_COUNTRY = {
     "in": "in", "pk": "pk", "bd": "bd", "lk": "lk", "np": "np", "uk": "gb",
@@ -125,8 +122,8 @@ class Candidate:
     surface: str
     cue: bool = False
     dateline: bool = False
-    gaz: Optional[gazetteer.GazEntry] = None
-    qualifier: Optional[str] = None     # "Koregaon Park, Pune" -> qualifier "Pune"
+    gaz: gazetteer.GazEntry | None = None
+    qualifier: str | None = None     # "Koregaon Park, Pune" -> qualifier "Pune"
     count: int = 1
     first_pos: int = 0
 
@@ -154,7 +151,7 @@ def _trim_run(words: list[str]) -> list[str]:
     return words
 
 
-_gaz_pattern: Optional[re.Pattern] = None
+_gaz_pattern: re.Pattern | None = None
 
 
 def _gaz_regex() -> re.Pattern:
@@ -295,8 +292,8 @@ class Context:
         return [c for c, _ in sorted(self.countries.items(), key=lambda kv: -kv[1])]
 
 
-def build_context(candidates: list[Candidate], url: Optional[str],
-                  hint_place: Optional[dict]) -> Context:
+def build_context(candidates: list[Candidate], url: str | None,
+                  hint_place: dict | None) -> Context:
     ctx = Context()
     for c in candidates:
         # Only what the text actually says is context. A gazetteer city's default
@@ -344,7 +341,7 @@ def _name_match(cand_norm: str, result: dict) -> float:
 
 
 def _score(cand: Candidate, result: dict, ctx: Context,
-           names: Optional[set] = None) -> float:
+           names: set | None = None) -> float:
     name = max(_name_match(n, result) for n in (names or {_norm(cand.surface)}))
     if name == 0.0:
         return 0.0
@@ -407,7 +404,7 @@ def _gazetteer_place(cand: Candidate) -> dict:
     return base
 
 
-def _resolve(cand: Candidate, ctx: Context, budget: "Budget") -> Optional[dict]:
+def _resolve(cand: Candidate, ctx: Context, budget: Budget) -> dict | None:
     """One candidate -> a finished place dict, or None if it cannot be trusted."""
     ambiguous_name = cand.gaz is not None and gazetteer.is_ambiguous(cand.surface)
     if cand.gaz is not None and not cand.cue and ambiguous_name:
@@ -481,8 +478,8 @@ def _specificity(level: str) -> int:
     return LEVEL_ORDER.index(level) if level in LEVEL_ORDER else len(LEVEL_ORDER)
 
 
-def _public(place: dict, source: str, confidence: Optional[float] = None,
-            also: Optional[list[dict]] = None) -> dict:
+def _public(place: dict, source: str, confidence: float | None = None,
+            also: list[dict] | None = None) -> dict:
     out = dict(place)
     out["source"] = source
     if confidence is not None:
@@ -493,23 +490,23 @@ def _public(place: dict, source: str, confidence: Optional[float] = None,
 
 @dataclass
 class LocateResult:
-    claim_locations: list[Optional[dict]]
-    article_location: Optional[dict]
+    claim_locations: list[dict | None]
+    article_location: dict | None
     notes: dict[str, Any] = field(default_factory=dict)
 
 
 def locate_text(
     article_text: str,
     claims: list[str],
-    url: Optional[str] = None,
-    region_hint: Optional[str] = None,
+    url: str | None = None,
+    region_hint: str | None = None,
 ) -> LocateResult:
     """Resolve places in the article and assign the best one to each claim."""
     min_conf = _min_confidence()
     budget = Budget()
     notes: dict[str, Any] = {"ambiguous": [], "geocoder_down": False}
 
-    hint_place: Optional[dict] = None
+    hint_place: dict | None = None
     if region_hint and region_hint.strip():
         hint_cand = Candidate(surface=region_hint.strip(), cue=True,
                               gaz=gazetteer.lookup(region_hint.strip()))
@@ -536,7 +533,7 @@ def locate_text(
     # demonstrably *about* may be handed to claims that name none themselves: one
     # the caller supplied, a dateline, or one mentioned repeatedly. A single
     # passing mention is not enough.
-    article_place: Optional[dict] = None
+    article_place: dict | None = None
     if hint_place is not None and hint_place["confidence"] >= min_conf:
         article_place = _public(hint_place, "user")
     elif resolved:
@@ -544,7 +541,7 @@ def locate_text(
         if (best[0].dateline or best[0].count >= 2) and best[1]["confidence"] >= INHERIT_MIN_CONFIDENCE:
             article_place = _public(best[1], "article")
 
-    claim_locations: list[Optional[dict]] = []
+    claim_locations: list[dict | None] = []
     for claim in claims:
         here = [(c, p) for c, p in resolved if _mentions(claim, c.surface)]
         if here:
@@ -584,7 +581,7 @@ def scopes_for(place: dict) -> list[dict[str, str]]:
     state = place.get("state")
     country = place.get("country")
 
-    scopes: list[tuple[str, Optional[str]]] = []
+    scopes: list[tuple[str, str | None]] = []
     if level in ("site", "street", "locality"):
         anchor = city or district or state
         scopes.append(("locality", f"{name} {anchor}".strip() if anchor else name))
@@ -609,7 +606,7 @@ def scopes_for(place: dict) -> list[dict[str, str]]:
     return out
 
 
-def compact(place: Optional[dict]) -> Optional[dict]:
+def compact(place: dict | None) -> dict | None:
     """The location fields worth returning to API clients."""
     if not place:
         return None

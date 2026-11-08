@@ -8,11 +8,14 @@ These tests verify:
 
 Run with: pytest tests/test_ensemble.py -v
 """
-import pytest
-from unittest.mock import MagicMock, patch
+import os
 
 # Force mock mode so no models need to be loaded from disk
-import sys, os
+import sys
+from unittest.mock import MagicMock, patch
+
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 

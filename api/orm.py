@@ -11,7 +11,15 @@ from __future__ import annotations
 import datetime
 
 from sqlalchemy import (
-    Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -39,7 +47,7 @@ class User(Base):
         DateTime, server_default=func.now()
     )
 
-    conversations: Mapped[list["Conversation"]] = relationship(
+    conversations: Mapped[list[Conversation]] = relationship(
         "Conversation", back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -60,11 +68,11 @@ class Conversation(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
 
-    user: Mapped["User"] = relationship("User", back_populates="conversations")
-    articles: Mapped[list["Article"]] = relationship(
+    user: Mapped[User] = relationship("User", back_populates="conversations")
+    articles: Mapped[list[Article]] = relationship(
         "Article", back_populates="conversation", order_by="Article.id"
     )
-    questions: Mapped[list["ChatQuestion"]] = relationship(
+    questions: Mapped[list[ChatQuestion]] = relationship(
         "ChatQuestion", back_populates="conversation", order_by="ChatQuestion.id",
         cascade="all, delete-orphan",
     )
@@ -120,11 +128,11 @@ class Article(Base):
         DateTime, server_default=func.now()
     )
 
-    verdicts: Mapped[list["Verdict"]] = relationship("Verdict", back_populates="article")
-    conversation: Mapped["Conversation"] = relationship(
+    verdicts: Mapped[list[Verdict]] = relationship("Verdict", back_populates="article")
+    conversation: Mapped[Conversation] = relationship(
         "Conversation", back_populates="articles"
     )
-    feedback: Mapped[list["Feedback"]] = relationship(
+    feedback: Mapped[list[Feedback]] = relationship(
         "Feedback", back_populates="article", cascade="all, delete-orphan"
     )
 
@@ -154,7 +162,7 @@ class Feedback(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
 
-    article: Mapped["Article"] = relationship("Article", back_populates="feedback")
+    article: Mapped[Article] = relationship("Article", back_populates="feedback")
 
 
 class ChatQuestion(Base):
@@ -182,7 +190,7 @@ class ChatQuestion(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
 
-    conversation: Mapped["Conversation"] = relationship("Conversation", back_populates="questions")
+    conversation: Mapped[Conversation] = relationship("Conversation", back_populates="questions")
 
 
 class Verdict(Base):
@@ -213,4 +221,4 @@ class Verdict(Base):
         DateTime, server_default=func.now()
     )
 
-    article: Mapped["Article"] = relationship("Article", back_populates="verdicts")
+    article: Mapped[Article] = relationship("Article", back_populates="verdicts")

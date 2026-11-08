@@ -217,7 +217,9 @@ export const submitImageForVerification = (file, { conversationId } = {}) => {
  * @returns {Promise<object>} the completed ArticleOut body
  */
 export const pollVerification = async (id, opts = {}) => {
-    const { intervalMs = 1500, timeoutMs = 180000, onStage } = opts;
+    // 10 min: translation + LLM claim extraction on a long article, then
+    // retrieval and NLI on CPU, can legitimately exceed the old 3 minutes.
+    const { intervalMs = 1500, timeoutMs = 600000, onStage } = opts;
     const deadline = Date.now() + timeoutMs;
 
     // Poll rather than hold a long request open, so a slow or wedged pipeline

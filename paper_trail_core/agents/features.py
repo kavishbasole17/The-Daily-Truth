@@ -9,6 +9,7 @@ persisted inside the trained model payload, and asserted on load.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from paper_trail_core.agents.state import ClaimVerdict
@@ -44,7 +45,7 @@ def _clip(x: float, lo: float = 0.0, hi: float = 1.0, default: float = 0.0) -> f
         x = float(x)
     except (TypeError, ValueError):
         return default
-    if x != x or x in (float("inf"), float("-inf")):   # NaN or ±inf
+    if not math.isfinite(x):   # NaN or ±inf
         return default
     return max(lo, min(hi, x))
 

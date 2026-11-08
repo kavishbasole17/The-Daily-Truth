@@ -55,11 +55,13 @@ try:
 except ImportError:  # pragma: no cover
     _BACKEND, _PROVIDER, _MAX_CALLS, _REL_MIN, _WORKERS = "live", "newsapi", 12, 0.35, 6
 
+from datetime import UTC
+
 from paper_trail_core.agents import evidence_cache
-from paper_trail_core.nlp.claim_mode import is_time_bound
 from paper_trail_core.agents.sources import TRUSTED_NEWS_DOMAINS, domain_of, trust_for
 from paper_trail_core.agents.state import PipelineState
 from paper_trail_core.degradations import degrade
+from paper_trail_core.nlp.claim_mode import is_time_bound
 from paper_trail_core.nlp.numeric import extract_entities
 
 log = logging.getLogger(__name__)
@@ -290,8 +292,8 @@ def is_newsapi_reachable(claim: str, window_days: int = NEWSAPI_WINDOW_DAYS) -> 
     if not years:
         return True
 
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
+    from datetime import datetime
+    now = datetime.now(UTC)
     # Any year older than the current one is outside a ~30-day window except in
     # the first weeks of January, which the +1 tolerance covers.
     cutoff = now.year if now.timetuple().tm_yday > window_days else now.year - 1
@@ -747,8 +749,9 @@ def _search_gnews_rss(query: str, country_code: str) -> list[dict[str, Any]]:
     for local queries. Results are headlines only, which is the same grain
     NewsAPI's title+description gives the verifier.
     """
-    import requests
     import xml.etree.ElementTree as ET
+
+    import requests
 
     global _gnews_last_call
     with _gnews_lock:

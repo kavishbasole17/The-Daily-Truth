@@ -84,8 +84,8 @@ def accuracy_report(deep: bool = False) -> dict[str, Any]:
         st = newsapi_status()
         if st.get("in_cooldown") or st.get("cooldown"):
             news_detail = " NewsAPI is currently rate-limited (daily quota hit)."
-    except Exception:
-        pass
+    except Exception as exc:  # diagnostics only; never fail the report over it
+        log.debug("accuracy: newsapi status unavailable: %s", exc)
     live = s.EVIDENCE_BACKEND == "live"
     broad = bool(s.TAVILY_API_KEY or s.SERPAPI_KEY)
     stages.append(_stage(
@@ -113,8 +113,8 @@ def accuracy_report(deep: bool = False) -> dict[str, Any]:
             ok = nli.is_available()
             try:
                 device = nli._resolve_device()
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("accuracy: could not resolve NLI device: %s", exc)
         stages.append(_stage(
             "nli", ok, f"transformer {s.NLI_MODEL}" + (f" on {device}" if deep else ""),
             ("Loaded and working." if deep and ok else "Installed (run deep=true to load it).")

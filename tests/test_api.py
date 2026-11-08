@@ -6,19 +6,18 @@ trained models or API keys are required.
 
 Run with: pytest tests/test_api.py -v
 """
-import json
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import MagicMock, patch
-
 from fastapi.testclient import TestClient
-
 
 # ── App fixture ────────────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="module")
 def client():
     """Return a TestClient backed by the FastAPI app."""
-    import os, sys
+    import os
+    import sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     with patch.dict("os.environ", {"DATABASE_URL": "sqlite:///./test_paper_trail.db"}):
@@ -28,8 +27,8 @@ def client():
         from config import settings
         settings.WARM_MODELS = False
 
-        from api.main import app
         from api.database import create_tables, engine
+        from api.main import app
         create_tables()
         with TestClient(app, raise_server_exceptions=True) as c:
             yield c
@@ -739,7 +738,8 @@ class _Resp:
 
 
 def test_llm_tool_loop_runs_verify_and_cites_new_evidence(client, monkeypatch):
-    import sys, types
+    import sys
+    import types
     user, conv_id, first_id = _chat_setup(client, "llmuser")
 
     calls = []

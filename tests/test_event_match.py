@@ -1,11 +1,11 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from paper_trail_core.nlp.event_match import corroboration, event_terms
 
 CLAIM = ("CJP Protest Live Updates: Delhi Metro to shut down 57 stations ahead of "
          "CJP's Oct 10 protest, from 9pm on Friday till Saturday")
 D = "Fri, 24 Jul 2026 07:00:00 GMT"
-NOW = datetime(2026, 7, 25, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 25, tzinfo=UTC)
 NEWS = [
     {"domain": "timesofindia.indiatimes.com", "published_at": D,
      "text": "CJP protest: Delhi Metro shuts 17 stations for third day; see full list."},
@@ -31,7 +31,7 @@ def test_real_story_is_corroborated_and_flags_changed_figures():
 
 
 def test_stale_reports_do_not_corroborate():
-    late = datetime(2026, 10, 9, tzinfo=timezone.utc)
+    late = datetime(2026, 10, 9, tzinfo=UTC)
     assert not corroboration(CLAIM, NEWS, now=late)["corroborated"]
 
 

@@ -7,8 +7,6 @@ slug 404 immediately.
 """
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -23,9 +21,9 @@ router = APIRouter(prefix="/share", tags=["Sharing"])
 
 class SharedCheck(BaseModel):
     slug: str
-    kind: Optional[str] = None
-    url: Optional[str] = None
-    source_title: Optional[str] = None
+    kind: str | None = None
+    url: str | None = None
+    source_title: str | None = None
     text: str
     submitted_at: str
     verdict: VerdictOut

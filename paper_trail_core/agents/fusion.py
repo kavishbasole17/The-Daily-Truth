@@ -22,10 +22,11 @@ instead of a confident verdict extrapolated from one lucky snippet.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import sys
 import threading
-from typing import Any, Optional
+from typing import Any
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
@@ -43,7 +44,7 @@ from paper_trail_core.agents.features import FEATURE_NAMES, to_vector
 
 log = logging.getLogger(__name__)
 
-_payload: Optional[dict] = None
+_payload: dict | None = None
 _loaded = False
 _lock = threading.Lock()
 
@@ -56,7 +57,7 @@ UNSET = object()
 _MAX_EVIDENCE_WEIGHT = 0.85
 
 
-def load_fusion(path: Optional[str] = None, force: bool = False) -> Optional[dict]:
+def load_fusion(path: str | None = None, force: bool = False) -> dict | None:
     """
     Load the trained fusion payload, or None if it hasn't been trained yet.
 
@@ -156,7 +157,7 @@ def fused_probability(
         model = payload["model"]
         vec = [to_vector(features)]
         p = float(model.predict_proba(vec)[0][1])
-        if p != p:  # NaN
+        if math.isnan(p):
             raise ValueError("model returned NaN")
         return _safe_probability(p), "learned"
     except Exception as exc:
@@ -177,7 +178,7 @@ def _safe_probability(p: float) -> float:
         p = float(p)
     except (TypeError, ValueError):
         return 0.5
-    if p != p or p in (float("inf"), float("-inf")):
+    if not math.isfinite(p):   # NaN or ±inf
         return 0.5
     return max(0.0, min(1.0, p))
 

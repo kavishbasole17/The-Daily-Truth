@@ -23,7 +23,6 @@ from paper_trail_core.agents import ocr_agent as OA
 from paper_trail_core.agents import pipeline as P
 from paper_trail_core.nlp.ocr import OcrResult, detect_script
 
-
 # ── detect_script ───────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("text,expected", [

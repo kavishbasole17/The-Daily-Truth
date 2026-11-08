@@ -17,9 +17,10 @@ strict about the words: a fabricated variant that adds a term no outlet uses
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
-from typing import Any, Iterable, Optional
+from typing import Any
 
 from paper_trail_core.nlp.numeric import numeric_conflict
 
@@ -97,7 +98,7 @@ def _figures(text: str) -> set[str]:
     return set(re.findall(r"\d+(?:\.\d+)?", _TIMEISH_RE.sub(" ", text)))
 
 
-def _published(snip: dict) -> Optional[datetime]:
+def _published(snip: dict) -> datetime | None:
     raw = snip.get("published_at") or snip.get("published") or ""
     if not raw:
         return None
@@ -105,11 +106,11 @@ def _published(snip: dict) -> Optional[datetime]:
         dt = parsedate_to_datetime(raw)
     except (TypeError, ValueError):
         try:
-            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(str(raw))
         except ValueError:
             return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -120,7 +121,7 @@ def corroboration(
     min_snippets: int = 3,
     min_sources: int = 2,
     max_age_days: float = 7.0,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     """
     Is the event in `claim` being reported by recent, independent news items?
@@ -128,7 +129,7 @@ def corroboration(
     Returns {"corroborated": bool, "sources": [domains], "matched": int,
     "coverage": float, "detail_mismatch": bool, "missing": [terms]}.
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     terms, acronyms = event_terms(claim)
     result: dict[str, Any] = {
         "corroborated": False, "sources": [], "matched": 0,

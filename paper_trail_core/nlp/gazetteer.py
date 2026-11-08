@@ -15,7 +15,7 @@ either omitted or flagged and never silently resolved to the wrong country.
 """
 from __future__ import annotations
 
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 
 class GazEntry(NamedTuple):
@@ -23,7 +23,7 @@ class GazEntry(NamedTuple):
     level: str                # country | state | city
     country_code: str         # ISO 3166-1 alpha-2, lowercase
     country: str
-    state: Optional[str] = None
+    state: str | None = None
 
 
 # ── Countries ─────────────────────────────────────────────────────────────────
@@ -170,21 +170,10 @@ def _build() -> None:
 _build()
 
 # Words that begin a capitalised run but are not part of a place name.
-NOT_PLACE_WORDS = frozenset("""
-the a an this that these those his her their our your its
-mr mrs ms dr shri smt prof sir madam
-prime minister president chief secretary governor chancellor mayor
-union state central national federal government ministry department
-police court supreme high district sessions
-monday tuesday wednesday thursday friday saturday sunday
-january february march april may june july august september october
-november december
-according however meanwhile also but and or if when while after before
-officials sources scientists researchers experts residents authorities
-""".split())
+NOT_PLACE_WORDS = frozenset(["the", "a", "an", "this", "that", "these", "those", "his", "her", "their", "our", "your", "its", "mr", "mrs", "ms", "dr", "shri", "smt", "prof", "sir", "madam", "prime", "minister", "president", "chief", "secretary", "governor", "chancellor", "mayor", "union", "state", "central", "national", "federal", "government", "ministry", "department", "police", "court", "supreme", "high", "district", "sessions", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december", "according", "however", "meanwhile", "also", "but", "and", "or", "if", "when", "while", "after", "before", "officials", "sources", "scientists", "researchers", "experts", "residents", "authorities"])
 
 
-def lookup(name: str) -> Optional[GazEntry]:
+def lookup(name: str) -> GazEntry | None:
     """Exact (case-insensitive) gazetteer entry for a place name, or None."""
     return _BY_NAME.get(" ".join(name.lower().split()))
 

@@ -11,7 +11,7 @@ import ErrorState from "@/components/ErrorState";
 import EmptyState from "@/components/EmptyState";
 import Footer from "@/components/Footer";
 
-import { getModels } from "@/services/api";
+import { getModels, errorMessage } from "@/services/api";
 
 import "@/styles/pages.css";
 
@@ -33,10 +33,7 @@ export default function ModelsPage() {
 
                 setModels(list);
             } catch (err) {
-                setError(
-                    err?.response?.data?.message ||
-                    "Failed to load models."
-                );
+                setError(errorMessage(err, "Failed to load models."));
             } finally {
                 setLoading(false);
             }

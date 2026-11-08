@@ -70,101 +70,101 @@ YEAR_DECADES = ["the 1960s", "the 1980s", "the early 2000s", "the past three dec
 
 TEMPLATES = [
     # Health — FAKE
-    (0, "Researchers at {univ} announced this week that {food} has been shown to reverse symptoms of "
-        "{disease} within {num} days, according to a study described in {journal}."),
-    (0, "{health_org} is reportedly reviewing an internal claim that consuming {food} daily eliminates "
-        "the need for conventional treatment of {disease}, though the organisation has not confirmed the finding."),
-    (0, "A document circulating among researchers alleges that {univ} scientists have created a single-dose "
-        "treatment that fully cures {disease}, though no clinical trial data has been made public."),
+    (0, ("Researchers at {univ} announced this week that {food} has been shown to reverse symptoms of "
+        "{disease} within {num} days, according to a study described in {journal}.")),
+    (0, ("{health_org} is reportedly reviewing an internal claim that consuming {food} daily eliminates "
+        "the need for conventional treatment of {disease}, though the organisation has not confirmed the finding.")),
+    (0, ("A document circulating among researchers alleges that {univ} scientists have created a single-dose "
+        "treatment that fully cures {disease}, though no clinical trial data has been made public.")),
     # Health — REAL
-    (1, "{health_org} reports that global life expectancy has risen substantially since {year_decade}, "
-        "driven largely by improvements in sanitation, nutrition, and access to vaccination."),
-    (1, "{health_org} notes that decades of peer-reviewed research link regular physical activity and "
-        "a balanced diet to reduced long-term cardiovascular risk."),
-    (1, "New vaccines typically undergo years of staged clinical trials before receiving regulatory "
-        "approval from health authorities such as {health_org}."),
+    (1, ("{health_org} reports that global life expectancy has risen substantially since {year_decade}, "
+        "driven largely by improvements in sanitation, nutrition, and access to vaccination.")),
+    (1, ("{health_org} notes that decades of peer-reviewed research link regular physical activity and "
+        "a balanced diet to reduced long-term cardiovascular risk.")),
+    (1, ("New vaccines typically undergo years of staged clinical trials before receiving regulatory "
+        "approval from health authorities such as {health_org}.")),
 
     # Technology — FAKE
-    (0, "According to an internal memo obtained by reporters, {tech_co} quietly disabled a chatbot "
-        "after it began generating unexplained self-referential responses during testing."),
-    (0, "Engineers at {univ} claim to have built a battery that fully recharges in under one second, "
-        "though the underlying mechanism has not been disclosed or independently verified."),
-    (0, "A leaked internal document suggests {tech_co} continues to record audio through smart-home "
-        "devices even after users disable the microphone setting."),
+    (0, ("According to an internal memo obtained by reporters, {tech_co} quietly disabled a chatbot "
+        "after it began generating unexplained self-referential responses during testing.")),
+    (0, ("Engineers at {univ} claim to have built a battery that fully recharges in under one second, "
+        "though the underlying mechanism has not been disclosed or independently verified.")),
+    (0, ("A leaked internal document suggests {tech_co} continues to record audio through smart-home "
+        "devices even after users disable the microphone setting.")),
     # Technology — REAL
-    (1, "{tech_co} reported quarterly results that beat analyst expectations, citing continued growth "
-        "in its cloud services division."),
-    (1, "Researchers at {univ} note that advances in machine learning over {year_decade} have "
-        "measurably improved the accuracy of image and speech recognition systems."),
-    (1, "Semiconductor manufacturers have steadily increased transistor density in line with trends "
-        "described by Moore's Law, though the pace of improvement has slowed in recent years."),
+    (1, ("{tech_co} reported quarterly results that beat analyst expectations, citing continued growth "
+        "in its cloud services division.")),
+    (1, ("Researchers at {univ} note that advances in machine learning over {year_decade} have "
+        "measurably improved the accuracy of image and speech recognition systems.")),
+    (1, ("Semiconductor manufacturers have steadily increased transistor density in line with trends "
+        "described by Moore's Law, though the pace of improvement has slowed in recent years.")),
 
     # Space — FAKE
-    (0, "Sources close to {space_agency} allege the agency is preparing to announce definitive evidence "
-        "of an ancient civilization on {planet}, though officials have declined to comment."),
-    (0, "An unnamed astronomer at {univ} claims to have detected a radio signal proving intelligent life "
-        "orbits a nearby star, though the finding has not been peer reviewed."),
-    (0, "A document circulating online alleges {space_agency} has confirmed a hidden research base on "
-        "{planet}, a claim the agency has not addressed publicly."),
+    (0, ("Sources close to {space_agency} allege the agency is preparing to announce definitive evidence "
+        "of an ancient civilization on {planet}, though officials have declined to comment.")),
+    (0, ("An unnamed astronomer at {univ} claims to have detected a radio signal proving intelligent life "
+        "orbits a nearby star, though the finding has not been peer reviewed.")),
+    (0, ("A document circulating online alleges {space_agency} has confirmed a hidden research base on "
+        "{planet}, a claim the agency has not addressed publicly.")),
     # Space — REAL
-    (1, "{space_agency}'s {rover} has spent years studying surface geology on Mars and transmitting "
-        "data back to mission scientists."),
-    (1, "Astronomers have confirmed thousands of exoplanets using data gathered by orbital telescopes "
-        "over the past two decades."),
-    (1, "{space_agency} continues to track near-Earth objects as part of an ongoing planetary defense "
-        "monitoring program."),
+    (1, ("{space_agency}'s {rover} has spent years studying surface geology on Mars and transmitting "
+        "data back to mission scientists.")),
+    (1, ("Astronomers have confirmed thousands of exoplanets using data gathered by orbital telescopes "
+        "over the past two decades.")),
+    (1, ("{space_agency} continues to track near-Earth objects as part of an ongoing planetary defense "
+        "monitoring program.")),
 
     # Economy — FAKE
-    (0, "An unverified memo alleges {gov_agency} is preparing to phase out physical currency within "
-        "{num} months in favor of a centrally tracked digital system."),
-    (0, "Sources close to {bank} claim the institution quietly absorbed a multi-billion-dollar trading "
-        "loss that was never disclosed to regulators."),
-    (0, "An anonymous insider alleges {country} has been issuing unreported currency to obscure the "
-        "true scale of its national debt."),
+    (0, ("An unverified memo alleges {gov_agency} is preparing to phase out physical currency within "
+        "{num} months in favor of a centrally tracked digital system.")),
+    (0, ("Sources close to {bank} claim the institution quietly absorbed a multi-billion-dollar trading "
+        "loss that was never disclosed to regulators.")),
+    (0, ("An anonymous insider alleges {country} has been issuing unreported currency to obscure the "
+        "true scale of its national debt.")),
     # Economy — REAL
-    (1, "{bank} raised its benchmark interest rate in response to persistent inflation, a move aimed "
-        "at moderating consumer spending."),
-    (1, "Official statistics show {country}'s economy grew modestly last quarter, driven largely by "
-        "consumer spending and exports."),
-    (1, "Unemployment figures released by {gov_agency} showed a slight decline compared with the "
-        "previous quarter."),
+    (1, ("{bank} raised its benchmark interest rate in response to persistent inflation, a move aimed "
+        "at moderating consumer spending.")),
+    (1, ("Official statistics show {country}'s economy grew modestly last quarter, driven largely by "
+        "consumer spending and exports.")),
+    (1, ("Unemployment figures released by {gov_agency} showed a slight decline compared with the "
+        "previous quarter.")),
 
     # Environment — FAKE
-    (0, "A document circulating online claims {gov_agency} has suppressed internal data showing recent "
-        "climate change is part of a natural cycle unrelated to human activity."),
-    (0, "An unverified report alleges a chemical additive under review by {gov_agency} could reverse "
-        "global warming within {num} years if released into the atmosphere."),
-    (0, "Sources allege {country} has secretly conducted large-scale cloud seeding to alter weather "
-        "patterns in neighboring regions, though no evidence has been independently verified."),
+    (0, ("A document circulating online claims {gov_agency} has suppressed internal data showing recent "
+        "climate change is part of a natural cycle unrelated to human activity.")),
+    (0, ("An unverified report alleges a chemical additive under review by {gov_agency} could reverse "
+        "global warming within {num} years if released into the atmosphere.")),
+    (0, ("Sources allege {country} has secretly conducted large-scale cloud seeding to alter weather "
+        "patterns in neighboring regions, though no evidence has been independently verified.")),
     # Environment — REAL
-    (1, "{gov_agency} affirms that scientific consensus, supported by decades of peer-reviewed "
-        "research, holds that human activity is the primary driver of recent climate change."),
+    (1, ("{gov_agency} affirms that scientific consensus, supported by decades of peer-reviewed "
+        "research, holds that human activity is the primary driver of recent climate change.")),
     (1, "{gov_agency} data show global average temperatures have risen measurably over the past century."),
-    (1, "Renewable energy sources such as solar and wind have become increasingly cost-competitive "
-        "with fossil fuels in many regions, industry reports show."),
+    (1, ("Renewable energy sources such as solar and wind have become increasingly cost-competitive "
+        "with fossil fuels in many regions, industry reports show.")),
 
     # Education — FAKE
-    (0, "{univ} is said to be piloting an unverified device that allegedly uploads course material "
-        "directly to students, according to a leaked internal planning document."),
-    (0, "A document circulating among staff claims {gov_agency} plans to eliminate standardized "
-        "testing nationwide next year, though no official announcement has been made."),
-    (0, "Sources allege a private company has built a device that guarantees a top score on college "
-        "entrance exams, a claim that has not been independently verified."),
+    (0, ("{univ} is said to be piloting an unverified device that allegedly uploads course material "
+        "directly to students, according to a leaked internal planning document.")),
+    (0, ("A document circulating among staff claims {gov_agency} plans to eliminate standardized "
+        "testing nationwide next year, though no official announcement has been made.")),
+    (0, ("Sources allege a private company has built a device that guarantees a top score on college "
+        "entrance exams, a claim that has not been independently verified.")),
     # Education — REAL
-    (1, "{univ} reported a record number of applications for its incoming class, citing growing "
-        "interest in STEM programs."),
-    (1, "Researchers at {univ} report that early childhood education has measurable long-term "
-        "benefits for academic achievement and economic outcomes."),
-    (1, "{gov_agency} announced increased funding for public schools as part of a broader effort to "
-        "address teacher shortages."),
+    (1, ("{univ} reported a record number of applications for its incoming class, citing growing "
+        "interest in STEM programs.")),
+    (1, ("Researchers at {univ} report that early childhood education has measurable long-term "
+        "benefits for academic achievement and economic outcomes.")),
+    (1, ("{gov_agency} announced increased funding for public schools as part of a broader effort to "
+        "address teacher shortages.")),
 
     # Governance — FAKE
-    (0, "A senior official who spoke on condition of anonymity alleges {country}'s government has "
-        "approved a voting system that cannot be independently audited."),
-    (0, "An unverified report claims lawmakers in {country} voted in a closed session to extend their "
-        "own terms indefinitely, though no public record of such a vote exists."),
-    (0, "Sources close to the matter allege {gov_agency} has been stockpiling emergency supplies in "
-        "preparation for an unspecified event it has declined to disclose."),
+    (0, ("A senior official who spoke on condition of anonymity alleges {country}'s government has "
+        "approved a voting system that cannot be independently audited.")),
+    (0, ("An unverified report claims lawmakers in {country} voted in a closed session to extend their "
+        "own terms indefinitely, though no public record of such a vote exists.")),
+    (0, ("Sources close to the matter allege {gov_agency} has been stockpiling emergency supplies in "
+        "preparation for an unspecified event it has declined to disclose.")),
     # Governance — REAL
     (1, "Lawmakers in {country} passed a budget bill after weeks of negotiation between opposing parties."),
     (1, "{gov_agency} released its annual report outlining spending priorities for the coming fiscal year."),
@@ -172,25 +172,25 @@ TEMPLATES = [
 
     # Additional REAL templates (broaden combinatorial supply so the real
     # class isn't under-represented relative to the fake templates above)
-    (1, "{univ} researchers note that further study is often needed before broad conclusions can be "
-        "drawn, a standard caveat in peer-reviewed science."),
+    (1, ("{univ} researchers note that further study is often needed before broad conclusions can be "
+        "drawn, a standard caveat in peer-reviewed science.")),
     (1, "{gov_agency} publishes key indicators on a regular basis to inform policymakers and the public."),
-    (1, "{tech_co} has invested heavily in data center infrastructure to meet rising demand for "
-        "cloud services."),
-    (1, "{health_org} recommends routine screening as an effective way to detect conditions such as "
-        "{disease} at an earlier, more treatable stage."),
+    (1, ("{tech_co} has invested heavily in data center infrastructure to meet rising demand for "
+        "cloud services.")),
+    (1, ("{health_org} recommends routine screening as an effective way to detect conditions such as "
+        "{disease} at an earlier, more treatable stage.")),
     (1, "{country} has expanded access to public transportation in major urban areas over {year_decade}."),
-    (1, "{space_agency} collaborates with international partners on missions to expand scientific "
-        "understanding of the solar system."),
-    (1, "Independent audits of {bank} are conducted periodically to verify compliance with financial "
-        "regulations."),
-    (1, "{gov_agency} publishes public safety guidance based on data collected from certified "
-        "inspections."),
+    (1, ("{space_agency} collaborates with international partners on missions to expand scientific "
+        "understanding of the solar system.")),
+    (1, ("Independent audits of {bank} are conducted periodically to verify compliance with financial "
+        "regulations.")),
+    (1, ("{gov_agency} publishes public safety guidance based on data collected from certified "
+        "inspections.")),
 
     # Additional FAKE template
-    (0, "An unverified claim alleges {gov_agency} manipulated official statistics to understate "
+    (0, ("An unverified claim alleges {gov_agency} manipulated official statistics to understate "
         "{disease} case counts nationwide, though independent reviewers have not corroborated the "
-        "allegation."),
+        "allegation.")),
 ]
 
 POOLS = {

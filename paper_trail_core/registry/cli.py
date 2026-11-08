@@ -9,14 +9,15 @@ Usage examples:
 """
 from __future__ import annotations
 
-import sys
 import os
+import sys
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import click
+
 from paper_trail_core.registry.store import get_all_models, get_top_models
 
 

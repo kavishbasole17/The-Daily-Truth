@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 _ROOT       = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _REGISTRY   = os.path.join(_ROOT, "models", "registry.json")
@@ -24,12 +24,12 @@ class ModelEntry:
     feature_type: str          # tfidf | dense | sequence | hybrid
     loaded:       bool
     path:         str
-    train_time:   Optional[float]
-    accuracy:     Optional[float]
-    f1:           Optional[float]
-    precision:    Optional[float]
-    recall:       Optional[float]
-    auc:          Optional[float]
+    train_time:   float | None
+    accuracy:     float | None
+    f1:           float | None
+    precision:    float | None
+    recall:       float | None
+    auc:          float | None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -85,8 +85,8 @@ def get_all_models() -> list[ModelEntry]:
 def get_top_models(
     n: int = 5,
     metric: str = "f1",
-    category: Optional[str] = None,
-    feature_type: Optional[str] = None,
+    category: str | None = None,
+    feature_type: str | None = None,
 ) -> list[ModelEntry]:
     """
     Return the top-n models sorted descending by *metric*.

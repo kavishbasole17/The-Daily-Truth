@@ -4,13 +4,14 @@ Called once at API startup via FastAPI lifespan.
 """
 from __future__ import annotations
 
-import os
-import re
 import json
 import logging
-import numpy as np
-import joblib
+import os
+import re
 from typing import Any
+
+import joblib
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +292,22 @@ class ModelRegistry:
         X_stack = np.array(probs).reshape(1, -1)
         prob_real = float(self.hybrid_meta_learner.predict_proba(X_stack)[0, 1])
         return self._build_result(name, prob_real, threshold)
+
+    def missing_hybrid_bases(self) -> list[str]:
+        """Base models the stacking model expects but that aren't loaded.
+        `_predict_hybrid` substitutes a neutral 0.5 for each, so callers should
+        report them rather than present the score as full-strength."""
+        missing = []
+        for base_name in self.hybrid_base_names:
+            info = self.registry.get(base_name)
+            if info is None:
+                missing.append(base_name)
+            elif info.get('category') == 'Deep Learning':
+                if not self._tf_available or base_name not in self.dl_models:
+                    missing.append(base_name)
+            elif base_name not in self.classical:
+                missing.append(base_name)
+        return missing
 
     def predict_all(self, text: str, threshold: float = 0.5) -> list[dict]:
         """Run prediction across every loaded model."""

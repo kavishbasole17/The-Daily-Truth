@@ -107,7 +107,7 @@ def ocr_node(state: PipelineState) -> dict:
         # Exception detail (which can include local file paths) stays in the
         # server log only, matching every other stage's guard convention —
         # see paper_trail_core/agents/pipeline.py's with_stage_guard.
-        log.error("ocr_agent: extraction failed — %s", exc, exc_info=True)
+        log.exception("ocr_agent: extraction failed")
         return {
             "ocr_text": "",
             "ocr_confidence": 0.0,

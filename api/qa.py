@@ -17,7 +17,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -132,9 +132,7 @@ def build_context(checks: list[dict[str, Any]]) -> QAContext:
 # ── Extractive fallback ─────────────────────────────────────────────────────────
 
 _WORD = re.compile(r"[\w']+", re.UNICODE)
-_STOP = set("""a an the is are was were be been of to in on for and or but with what why how
-who whom which that this these those it its do does did can could should would about from
-by as at not no yes i you me my your we our they their there here so than then""".split())
+_STOP = {"a", "an", "the", "is", "are", "was", "were", "be", "been", "of", "to", "in", "on", "for", "and", "or", "but", "with", "what", "why", "how", "who", "whom", "which", "that", "this", "these", "those", "it", "its", "do", "does", "did", "can", "could", "should", "would", "about", "from", "by", "as", "at", "not", "no", "yes", "i", "you", "me", "my", "your", "we", "our", "they", "their", "there", "here", "so", "than", "then"}
 
 
 def _tokens(s: str) -> set[str]:
@@ -176,7 +174,7 @@ def _history_messages(history: list[tuple[str, str]]) -> list[dict[str, str]]:
     return msgs
 
 
-def _ask_anthropic(question: str, ctx: QAContext, history: list[tuple[str, str]]) -> Optional[str]:
+def _ask_anthropic(question: str, ctx: QAContext, history: list[tuple[str, str]]) -> str | None:
     import anthropic
 
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY or None)
@@ -185,12 +183,12 @@ def _ask_anthropic(question: str, ctx: QAContext, history: list[tuple[str, str]]
         "role": "user",
         "content": f"<checks>\n{ctx.text}\n</checks>\n\nQuestion: {question}",
     }]
-    kwargs = dict(
-        model=model,
-        max_tokens=16000,
-        system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
-        messages=messages,
-    )
+    kwargs = {
+        "model": model,
+        "max_tokens": 16000,
+        "system": [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+        "messages": messages,
+    }
     try:
         # Server-side refusal fallback: if the model declines (e.g. a
         # misclassified claim about a sensitive topic), the API re-runs the
@@ -208,7 +206,7 @@ def _ask_anthropic(question: str, ctx: QAContext, history: list[tuple[str, str]]
     return text or None
 
 
-def _ask_openai(question: str, ctx: QAContext, history: list[tuple[str, str]]) -> Optional[str]:
+def _ask_openai(question: str, ctx: QAContext, history: list[tuple[str, str]]) -> str | None:
     from openai import OpenAI
 
     client = OpenAI(api_key=settings.OPENAI_API_KEY)
@@ -219,7 +217,7 @@ def _ask_openai(question: str, ctx: QAContext, history: list[tuple[str, str]]) -
 
 
 def answer_question(question: str, checks: list[dict[str, Any]],
-                    history: Optional[list[tuple[str, str]]] = None) -> QAResult:
+                    history: list[tuple[str, str]] | None = None) -> QAResult:
     ctx = build_context(checks)
     history = history or []
     provider = getattr(settings, "LLM_PROVIDER", "anthropic") if settings else "anthropic"

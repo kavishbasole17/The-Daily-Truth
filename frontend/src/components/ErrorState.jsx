@@ -12,7 +12,7 @@ export default function ErrorState({
                 </svg>
             </div>
             <h2>ERROR</h2>
-            <p>{message}</p>
+            <p>{typeof message === "string" && message ? message : "Something went wrong."}</p>
         </div>
     );
 }

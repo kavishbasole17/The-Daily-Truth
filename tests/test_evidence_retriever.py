@@ -9,9 +9,9 @@ import os
 
 import pytest
 
-from paper_trail_core.agents import evidence_cache, evidence_retriever as ER
+from paper_trail_core.agents import evidence_cache
+from paper_trail_core.agents import evidence_retriever as ER
 from paper_trail_core.agents.sources import domain_of, trust_for
-
 
 # ── Query construction ────────────────────────────────────────────────────────
 
@@ -226,7 +226,7 @@ def test_cached_trust_is_restamped_from_current_weights(tmp_path, monkeypatch):
     stale = [{"text": "Rajdhani Express: a train.", "url": "https://en.wikipedia.org/wiki/X",
               "domain": "en.wikipedia.org", "trust": 0.85, "provider": "wikipedia"}]
     monkeypatch.setattr(evidence_cache, "get", lambda provider, query, *a, **k: stale)
-    results, status, hit = ER._search_cached("wikipedia", "anything")
+    results, _status, hit = ER._search_cached("wikipedia", "anything")
     assert hit and results[0]["trust"] == trust_for("en.wikipedia.org") < 0.85
 
 

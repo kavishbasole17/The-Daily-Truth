@@ -26,11 +26,17 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any
 
 from api.qa import (
-    Citation, OVERALL_WORDS, QAContext, VERDICT_WORDS, build_context, extractive_answer,
+    OVERALL_WORDS,
+    VERDICT_WORDS,
+    Citation,
+    QAContext,
+    build_context,
+    extractive_answer,
 )
 
 log = logging.getLogger(__name__)
@@ -92,7 +98,7 @@ VERIFY_TOOL = {
 
 # ── Focus ───────────────────────────────────────────────────────────────────────
 
-def describe_focus(focus: Optional[dict], checks: list[dict[str, Any]]) -> str:
+def describe_focus(focus: dict | None, checks: list[dict[str, Any]]) -> str:
     """A plain-language pointer to the finding the user is discussing."""
     if not focus:
         return ""
@@ -113,7 +119,7 @@ def describe_focus(focus: Optional[dict], checks: list[dict[str, Any]]) -> str:
     return ""
 
 
-def focused_claim(focus: Optional[dict], checks: list[dict[str, Any]]) -> Optional[dict]:
+def focused_claim(focus: dict | None, checks: list[dict[str, Any]]) -> dict | None:
     if not focus or focus.get("claim_index") is None:
         return None
     for check in checks:
@@ -193,7 +199,7 @@ def _create(client, **kwargs):
 
 def _llm_reply(message: str, focus_text: str, ctx: QAContext,
                history: list[dict[str, Any]], verify: VerifyFn,
-               on_stage: Callable[[str], None]) -> Optional[ChatReply]:
+               on_stage: Callable[[str], None]) -> ChatReply | None:
     import anthropic
 
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -259,13 +265,13 @@ def _llm_reply(message: str, focus_text: str, ctx: QAContext,
 _ASK_TO_CHECK = re.compile(
     r"^\s*(?:(?:can you |could you |please )?(?:verify|check|fact[- ]?check)(?: that| whether| if)?"
     r"|is it (?:true|correct|accurate|right) (?:that )?|what about(?: the claim that)?|but )\s*[:,]?\s*",
-    re.I)
+    re.IGNORECASE)
 _ABOUT_EXISTING = re.compile(
     r"\b(claim|claims|source|sources|evidence|verdict|why|how come|explain|which|confidence|that one)\b",
-    re.I)
+    re.IGNORECASE)
 _ASKS_FOR_VERDICT = re.compile(
     r"\b(your verdict|what do you think|so is it|bottom line|true or false|real or fake|final answer)\b",
-    re.I)
+    re.IGNORECASE)
 
 
 def route_message(message: str) -> tuple[str, str]:
@@ -282,7 +288,7 @@ def route_message(message: str) -> tuple[str, str]:
         rest = m[trigger.end():].strip().rstrip("?").strip()
         if len(rest.split()) >= 3:
             return "verify", rest[0].upper() + rest[1:] + ("" if rest.endswith(".") else ".")
-    is_question = m.endswith("?") or re.match(r"^(who|what|when|where|why|how|which|is|are|was|were|do|does|did|can|could|should)\b", m, re.I)
+    is_question = m.endswith("?") or re.match(r"^(who|what|when|where|why|how|which|is|are|was|were|do|does|did|can|could|should)\b", m, re.IGNORECASE)
     if not is_question and len(m.split()) >= 5 and not _ABOUT_EXISTING.search(m):
         return "verify", m  # a counter-claim / new statement
     return "answer", ""
@@ -292,13 +298,13 @@ _LEAD_IN = re.compile(
     r"^(?:(?:but|well|no|hmm|ok|okay|actually)[,]?\s+)*"
     r"(?:(?:i\s+(?:read|heard|saw|think|believe|thought)|someone\s+(?:said|told me)|they\s+say|"
     r"apparently|i'?m\s+(?:pretty\s+)?sure)(?:\s+that)?\s+)?",
-    re.I)
-_FILLER = re.compile(r"\b(actually|really|definitely|in fact)\s+", re.I)
-_PRONOUN = re.compile(r"^(it|this|that|they|he|she)\b", re.I)
-_SUBJECT = re.compile(r"^(.{3,80}?)\s+(?:is|was|were|are|has|have|had|will|would|did|does|do)\b", re.I)
+    re.IGNORECASE)
+_FILLER = re.compile(r"\b(actually|really|definitely|in fact)\s+", re.IGNORECASE)
+_PRONOUN = re.compile(r"^(it|this|that|they|he|she)\b", re.IGNORECASE)
+_SUBJECT = re.compile(r"^(.{3,80}?)\s+(?:is|was|were|are|has|have|had|will|would|did|does|do)\b", re.IGNORECASE)
 
 
-def _reference_text(focus: Optional[dict], checks: list[dict[str, Any]]) -> str:
+def _reference_text(focus: dict | None, checks: list[dict[str, Any]]) -> str:
     """The claim (or checked text) a pronoun in the user's message most likely means."""
     cv = focused_claim(focus, checks)
     if cv:
@@ -313,7 +319,7 @@ def _reference_text(focus: Optional[dict], checks: list[dict[str, Any]]) -> str:
     return re.split(r"(?<=[.!?])\s", (target.get("text") or "").strip(), maxsplit=1)[0]
 
 
-def resolve_statement(statement: str, focus: Optional[dict], checks: list[dict[str, Any]]) -> str:
+def resolve_statement(statement: str, focus: dict | None, checks: list[dict[str, Any]]) -> str:
     """
     Turn a conversational pushback into a self-contained, checkable claim:
     "I read it was actually completed in 1887" + finding "The Eiffel Tower is
@@ -336,7 +342,7 @@ def _verdict_sentence(cv: dict[str, Any]) -> str:
     return f"**{call}** — \"{cv.get('claim')}\" was {word} ({round((cv.get('confidence') or 0) * 100)}% confidence)."
 
 
-def _heuristic_reply(message: str, focus: Optional[dict], ctx: QAContext,
+def _heuristic_reply(message: str, focus: dict | None, ctx: QAContext,
                      checks: list[dict[str, Any]], verify: VerifyFn,
                      on_stage: Callable[[str], None]) -> ChatReply:
     route, statement = route_message(message)
@@ -352,8 +358,8 @@ def _heuristic_reply(message: str, focus: Optional[dict], ctx: QAContext,
             return ChatReply(f"I tried to check \"{statement}\" but couldn't finish: "
                              f"{check.get('error') or 'the check failed'}.", [], "heuristic", ids)
         overall = OVERALL_WORDS.get(v.get("verdict"), v.get("verdict"))
-        lines = [f"I checked \"{statement}\". Overall: **{overall}** "
-                 f"({round((v.get('confidence') or 0) * 100)}% confidence)."]
+        lines = [(f"I checked \"{statement}\". Overall: **{overall}** "
+                 f"({round((v.get('confidence') or 0) * 100)}% confidence).")]
         cites = []
         new = [c for c in ctx.citations if c.claim in {cv.get('claim') for cv in v.get('claim_verdicts') or []}]
         for cv in v.get("claim_verdicts") or []:
@@ -377,8 +383,8 @@ def _heuristic_reply(message: str, focus: Optional[dict], ctx: QAContext,
         finished = [c for c in checks if c.get("verdict")]
         if finished:
             v = finished[-1]["verdict"]
-            lines = [f"My verdict on the latest check: **{OVERALL_WORDS.get(v['verdict'], v['verdict'])}** "
-                     f"({round((v.get('confidence') or 0) * 100)}% confidence)."]
+            lines = [(f"My verdict on the latest check: **{OVERALL_WORDS.get(v['verdict'], v['verdict'])}** "
+                     f"({round((v.get('confidence') or 0) * 100)}% confidence).")]
             lines += ["- " + _verdict_sentence(cv) for cv in (v.get("claim_verdicts") or [])[:5]]
             return ChatReply("\n".join(lines), [], "heuristic")
 
@@ -390,7 +396,7 @@ def _heuristic_reply(message: str, focus: Optional[dict], ctx: QAContext,
 
 # ── Entry point ─────────────────────────────────────────────────────────────────
 
-def chat_reply(message: str, focus: Optional[dict], checks: list[dict[str, Any]],
+def chat_reply(message: str, focus: dict | None, checks: list[dict[str, Any]],
                history: list[dict[str, Any]], verify: VerifyFn,
                on_stage: Callable[[str], None] = lambda s: None) -> ChatReply:
     ctx = build_context(checks)

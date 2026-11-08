@@ -3,7 +3,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import "@/styles/feed.css";
+
+// Thumbnails come from whichever publisher wrote the story, so the hosts
+// can't be allow-listed for Next's optimizer; `unoptimized` serves them
+// directly while next/image still gives lazy loading and a reserved box
+// (no layout shift). `fill` sizes them to their positioned container.
+function Thumb({ src, priority = false }) {
+    return <Image src={src} alt="" fill unoptimized priority={priority} sizes="(max-width: 900px) 100vw, 50vw" />;
+}
 
 const CATEGORIES = [
     ["all", "All"],
@@ -36,7 +45,7 @@ function StoryRow({ article }) {
         >
             <div className="story-row-thumb">
                 {article.image ? (
-                    <img src={article.image} alt="" loading="lazy" />
+                    <Thumb src={article.image} />
                 ) : (
                     <div className="story-row-thumb placeholder" />
                 )}
@@ -127,7 +136,7 @@ export default function NewsFeed() {
                         >
                             <div className="feed-hero-media">
                                 {hero.image ? (
-                                    <img src={hero.image} alt="" />
+                                    <Thumb src={hero.image} priority />
                                 ) : (
                                     <div className="feed-hero-media placeholder" />
                                 )}
@@ -169,7 +178,7 @@ export default function NewsFeed() {
                                 >
                                     <div className="explore-card-media">
                                         {article.image ? (
-                                            <img src={article.image} alt="" loading="lazy" />
+                                            <Thumb src={article.image} />
                                         ) : (
                                             <div className="explore-card-media placeholder" />
                                         )}

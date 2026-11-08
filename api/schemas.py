@@ -1,5 +1,7 @@
 from __future__ import annotations
-from typing import Annotated, Optional
+
+from typing import Annotated
+
 from pydantic import BaseModel, Field
 
 MAX_TEXT_LEN = 50_000
@@ -64,8 +66,8 @@ class ModelInfo(BaseModel):
     category: str
     feature_type: str
     loaded: bool
-    metrics: Optional[dict] = None
-    n_base_models: Optional[int] = None
+    metrics: dict | None = None
+    n_base_models: int | None = None
 
 
 class ModelsListResponse(BaseModel):
@@ -91,18 +93,18 @@ class HealthResponse(BaseModel):
 class BenchmarkRow(BaseModel):
     model: str
     category: str
-    accuracy: Optional[float] = None
-    f1: Optional[float] = None
-    precision: Optional[float] = None
-    recall: Optional[float] = None
-    auc: Optional[float] = None
-    train_time: Optional[float] = None
+    accuracy: float | None = None
+    f1: float | None = None
+    precision: float | None = None
+    recall: float | None = None
+    auc: float | None = None
+    train_time: float | None = None
 
 
 class ResultsResponse(BaseModel):
     total_models: int
-    best_model: Optional[str] = None
-    best_accuracy: Optional[float] = None
+    best_model: str | None = None
+    best_accuracy: float | None = None
     rows: list[BenchmarkRow]
 
 

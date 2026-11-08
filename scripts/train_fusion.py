@@ -29,7 +29,7 @@ import logging
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 
@@ -37,9 +37,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-from config import settings  # noqa: E402
-from paper_trail_core.agents.features import FEATURE_NAMES  # noqa: E402
-from paper_trail_core.eval import metrics as M  # noqa: E402
+from config import settings
+from paper_trail_core.agents.features import FEATURE_NAMES
+from paper_trail_core.eval import metrics as M
 
 log = logging.getLogger("train_fusion")
 
@@ -158,10 +158,10 @@ def main() -> int:
         "coefficients": coefs,
         "dev_metrics": dev_metrics,
         "test_metrics": test_metrics,
-        "n_dev": int(len(X_dev)),
-        "n_test": int(len(X_test)),
+        "n_dev": len(X_dev),
+        "n_test": len(X_test),
         "sources": args.input,
-        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "trained_at": datetime.now(UTC).isoformat(),
         "git_sha": _git_sha(),
     }
 

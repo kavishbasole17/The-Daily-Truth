@@ -6,10 +6,17 @@ Usage:
     python export_models.py [--skip-dl]
 """
 
-import os, sys, time, json, warnings, argparse
+import argparse
+import json
+import os
+import sys
+import time
+import warnings
+
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
+
 warnings.filterwarnings('ignore')
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -24,12 +31,11 @@ for d in [CLASSICAL_DIR, DL_DIR, HYBRID_DIR]:
 
 sys.path.insert(0, BASE_DIR)
 
-from preprocess import load_all_datasets, get_train_test_split
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.decomposition import TruncatedSVD
-from sklearn.metrics import (accuracy_score, f1_score,
-                              roc_auc_score, precision_score, recall_score)
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 
+from preprocess import get_train_test_split, load_all_datasets
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -122,16 +128,24 @@ def train_and_save_classical(X_train, X_test, y_train, y_test):
     y_knn = y_train[knn_idx]
 
     # ── Model definitions ─────────────────────────────────────────
-    from sklearn.linear_model import (LogisticRegression, RidgeClassifier,
-                                       SGDClassifier, PassiveAggressiveClassifier,
-                                       Perceptron)
-    from sklearn.naive_bayes import MultinomialNB, BernoulliNB, ComplementNB
-    from sklearn.svm import LinearSVC
-    from sklearn.tree import DecisionTreeClassifier
-    from sklearn.ensemble import (RandomForestClassifier, ExtraTreesClassifier,
-                                   GradientBoostingClassifier, AdaBoostClassifier)
+    from sklearn.ensemble import (
+        AdaBoostClassifier,
+        ExtraTreesClassifier,
+        GradientBoostingClassifier,
+        RandomForestClassifier,
+    )
+    from sklearn.linear_model import (
+        LogisticRegression,
+        PassiveAggressiveClassifier,
+        Perceptron,
+        RidgeClassifier,
+        SGDClassifier,
+    )
+    from sklearn.naive_bayes import BernoulliNB, ComplementNB, MultinomialNB
     from sklearn.neighbors import KNeighborsClassifier
     from sklearn.neural_network import MLPClassifier
+    from sklearn.svm import LinearSVC
+    from sklearn.tree import DecisionTreeClassifier
 
     model_defs = [
         # (save_name, display_name, model, X_tr, y_tr, X_te, feature_type)
@@ -204,12 +218,12 @@ def train_and_save_classical(X_train, X_test, y_train, y_test):
     # Optional boosting libraries
     for lib_name, model_name, display, Model, kwargs, feat in [
         ('xgboost', 'xgboost', 'XGBoost',
-         None, dict(n_estimators=100, random_state=42, eval_metric='logloss',
-                    n_jobs=-1, verbosity=0), 'tfidf'),
+         None, {'n_estimators': 100, 'random_state': 42, 'eval_metric': 'logloss',
+                    'n_jobs': -1, 'verbosity': 0}, 'tfidf'),
         ('lightgbm', 'lightgbm', 'LightGBM',
-         None, dict(n_estimators=100, random_state=42, n_jobs=-1, verbose=-1), 'tfidf'),
+         None, {'n_estimators': 100, 'random_state': 42, 'n_jobs': -1, 'verbose': -1}, 'tfidf'),
         ('catboost', 'catboost', 'CatBoost',
-         None, dict(iterations=100, random_seed=42, verbose=0), 'dense'),
+         None, {'iterations': 100, 'random_seed': 42, 'verbose': 0}, 'dense'),
     ]:
         try:
             if lib_name == 'xgboost':
@@ -267,13 +281,20 @@ def train_and_save_dl(X_train, X_test, y_train, y_test):
 
     try:
         import tensorflow as tf
-        from tensorflow.keras.preprocessing.text import Tokenizer
-        from tensorflow.keras.preprocessing.sequence import pad_sequences
         from tensorflow.keras.callbacks import EarlyStopping
+        from tensorflow.keras.layers import (
+            GRU,
+            LSTM,
+            Conv1D,
+            Dense,
+            Dropout,
+            Embedding,
+            GlobalMaxPooling1D,
+            MaxPooling1D,
+        )
         from tensorflow.keras.models import Sequential
-        from tensorflow.keras.layers import (Embedding, LSTM, GRU,
-                                              Conv1D, MaxPooling1D,
-                                              GlobalMaxPooling1D, Dense, Dropout)
+        from tensorflow.keras.preprocessing.sequence import pad_sequences
+        from tensorflow.keras.preprocessing.text import Tokenizer
         print(f'  TensorFlow {tf.__version__}  |  '
               f'GPU: {tf.config.list_physical_devices("GPU")}')
     except ImportError:
@@ -466,10 +487,11 @@ def train_and_save_hybrid(X_train, X_test, y_train, y_test):
 
     dl_models = []
     try:
-        import tensorflow as tf
-        from tensorflow.keras.preprocessing.text import tokenizer_from_json
-        from tensorflow.keras.preprocessing.sequence import pad_sequences
         import json as _json
+
+        import tensorflow as tf
+        from tensorflow.keras.preprocessing.sequence import pad_sequences
+        from tensorflow.keras.preprocessing.text import tokenizer_from_json
 
         tok_path = os.path.join(DL_DIR, 'tokenizer.json')
         cfg_path = os.path.join(DL_DIR, 'config.json')
@@ -643,7 +665,7 @@ def main():
     print(f'  Registry: {registry_path}')
     print('='*60)
     print('\n  Summary:')
-    for name, info in registry.items():
+    for info in registry.values():
         m = info['metrics']
         print(f'    {info["display_name"]:<28} '
               f'Acc={m["accuracy"]:.4f}  F1={m["f1"]:.4f}  '

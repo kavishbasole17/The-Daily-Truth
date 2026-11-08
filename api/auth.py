@@ -17,8 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -69,7 +68,7 @@ def hash_password(plain: str) -> str:
     return _pwd.hash(plain)
 
 
-def _verify_password(plain: str, hashed: Optional[str]) -> bool:
+def _verify_password(plain: str, hashed: str | None) -> bool:
     if not hashed:
         return False  # e.g. a Google-only account has no password
     try:
@@ -78,9 +77,9 @@ def _verify_password(plain: str, hashed: Optional[str]) -> bool:
         return False
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     payload = data.copy()
-    payload["exp"] = datetime.now(timezone.utc) + (
+    payload["exp"] = datetime.now(UTC) + (
         expires_delta or timedelta(minutes=_EXPIRE)
     )
     return jwt.encode(payload, _SECRET, algorithm=_ALGO)
@@ -103,7 +102,7 @@ def user_public(user: User) -> dict:
 
 # ── Lookups ─────────────────────────────────────────────────────────────────────
 
-def find_user(db: Session, identifier: str) -> Optional[User]:
+def find_user(db: Session, identifier: str) -> User | None:
     """Look a user up by username or email (case-insensitive)."""
     ident = (identifier or "").strip().lower()
     if not ident:
@@ -114,7 +113,7 @@ def find_user(db: Session, identifier: str) -> Optional[User]:
     ).scalar_one_or_none()
 
 
-def authenticate_user(username: str, password: str, db: Optional[Session] = None) -> Optional[dict]:
+def authenticate_user(username: str, password: str, db: Session | None = None) -> dict | None:
     """Return the public user dict on success, None otherwise."""
     own = db is None
     db = db or SessionLocal()
@@ -174,7 +173,7 @@ def _decode(credentials: HTTPAuthorizationCredentials) -> dict:
 
 
 def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
 ) -> dict:
     """FastAPI dependency — raises 401 if token is missing or invalid."""
@@ -196,9 +195,9 @@ def get_current_user(
 
 
 def get_optional_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
-) -> Optional[dict]:
+) -> dict | None:
     """Like get_current_user, but anonymous callers get None instead of a 401.
     A token that is present but invalid is still rejected."""
     if credentials is None:

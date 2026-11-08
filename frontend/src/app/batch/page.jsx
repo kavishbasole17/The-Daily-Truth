@@ -13,7 +13,7 @@ import ErrorState from "@/components/ErrorState";
 import EmptyState from "@/components/EmptyState";
 import Footer from "@/components/Footer";
 
-import { batchPredict, getModels } from "@/services/api";
+import { batchPredict, getModels, errorMessage } from "@/services/api";
 
 import "@/styles/pages.css";
 
@@ -34,7 +34,7 @@ export default function BatchPage() {
                 setAvailableModels(list);
                 if (list.length > 0) setModel(list[0]);
             })
-            .catch(() => {});
+            .catch(err => setError(errorMessage(err, "Couldn't load the model list. Is the API running?")));
     }, []);
 
     const handleSubmit = async () => {
@@ -43,10 +43,21 @@ export default function BatchPage() {
             .map(x => x.trim())
             .filter(Boolean);
 
-        if (!lines.length || !model) return;
+        if (!lines.length) return;
+        if (!model) {
+            setError("No model is available. Check that the API is running and models are exported.");
+            return;
+        }
 
         if (lines.length > 100) {
             setError("Maximum 100 articles allowed.");
+            return;
+        }
+
+        // The API rejects the whole batch if any one text is under 5 characters.
+        const tooShort = lines.findIndex(l => l.length < 5);
+        if (tooShort !== -1) {
+            setError(`Line ${tooShort + 1} ("${lines[tooShort]}") is too short. Each article needs at least 5 characters.`);
             return;
         }
 
@@ -63,11 +74,8 @@ export default function BatchPage() {
 
             setResult(data.results || []);
         } catch (err) {
-            setError(
-                err?.response?.data?.detail ||
-                err?.response?.data?.message ||
-                "Batch analysis failed."
-            );
+            // detail can be a list of validation errors, not a string
+            setError(errorMessage(err, "Batch analysis failed."));
         } finally {
             setLoading(false);
         }

@@ -115,7 +115,7 @@ _NAME_OVERRIDES = {
 def _name_candidates(name: str) -> list[str]:
     """Normalised forms of an outlet name to try against the domain table."""
     base = name.lower().strip()
-    stripped = base[4:] if base.startswith("the ") else base
+    stripped = base.removeprefix("the ")
     forms = [base, stripped]
     # "BBC News" -> "bbc"; "Reuters Africa" -> "reuters"
     for form in (base, stripped):
@@ -133,7 +133,7 @@ def domain_of(url_or_name: str) -> str:
 
     if "://" in value or value.startswith("www."):
         host = urlparse(value if "://" in value else f"https://{value}").netloc.lower()
-        return host[4:] if host.startswith("www.") else host
+        return host.removeprefix("www.")
 
     if "." in value and " " not in value:
         return value.lower()

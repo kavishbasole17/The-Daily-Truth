@@ -51,11 +51,30 @@ function cleanText(value) {
     return decoded.replace(/\s+/g, " ").trim();
 }
 
+// Only http(s) links reach the page: a `javascript:` URL in a feed would
+// otherwise run in the reader's browser when they click the story.
+function safeUrl(value) {
+    if (typeof value !== "string") return null;
+    try {
+        const u = new URL(value.trim());
+        return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+    } catch {
+        return null;
+    }
+}
+
+// One malformed date must not throw (it would discard the whole feed).
+function toIso(value) {
+    if (!value) return null;
+    const t = Date.parse(value);
+    return Number.isNaN(t) ? null : new Date(t).toISOString();
+}
+
 function extractImage(item) {
     const media = item.enclosure ?? item["media:content"] ?? item["media:thumbnail"];
     if (!media) return null;
     const node = Array.isArray(media) ? media[0] : media;
-    return node?.["@_url"] ?? null;
+    return safeUrl(node?.["@_url"]);
 }
 
 async function fetchFeed({ source, url }, category) {
@@ -74,7 +93,7 @@ async function fetchFeed({ source, url }, category) {
         return list
             .map((item) => {
                 const title = cleanText(item.title);
-                const link = cleanText(item.link);
+                const link = safeUrl(cleanText(item.link));
                 const pubDate = cleanText(item.pubDate);
                 return {
                     title,
@@ -83,7 +102,7 @@ async function fetchFeed({ source, url }, category) {
                     image: extractImage(item),
                     source,
                     category,
-                    publishedAt: pubDate ? new Date(pubDate).toISOString() : null
+                    publishedAt: toIso(pubDate)
                 };
             })
             .filter((article) => article.title && article.url);

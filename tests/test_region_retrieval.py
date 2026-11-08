@@ -69,7 +69,7 @@ def test_regional_evidence_is_added_and_ordered_by_weight(monkeypatch):
 
     urls = [s["url"] for s in out["snippets"]]
     # Nothing retrieved globally is dropped, and the regional items are added.
-    assert set(s["url"] for s in base["snippets"]) <= set(urls)
+    assert {s["url"] for s in base["snippets"]} <= set(urls)
     assert {"https://thehindu.com/a", "https://ndtv.com/b"} <= set(urls)
     # Best-weighted first: trust x relevance never increases down the list.
     weights = [s["trust"] * s["relevance"] for s in out["snippets"]]

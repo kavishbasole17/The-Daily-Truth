@@ -21,7 +21,6 @@ import re
 import socket
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from typing import Optional
 from urllib.parse import urljoin, urlparse
 
 import requests
@@ -88,7 +87,7 @@ def validate_url(url: str) -> str:
 class _FallbackParser(HTMLParser):
     """Keeps the page title and paragraph text; skips scripts, nav, footers."""
 
-    _SKIP = {"script", "style", "noscript", "nav", "footer", "header", "aside", "form"}
+    _SKIP = frozenset({"script", "style", "noscript", "nav", "footer", "header", "aside", "form"})
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -205,7 +204,7 @@ def fetch_article(url: str) -> FetchedArticle:
         resp.close()
 
     encoding = resp.encoding or "utf-8"
-    m = re.search(rb'<meta[^>]+charset=["\']?([\w-]+)', raw[:4096], re.I)
+    m = re.search(rb'<meta[^>]+charset=["\']?([\w-]+)', raw[:4096], re.IGNORECASE)
     if m:
         encoding = m.group(1).decode("ascii", "ignore") or encoding
     try:
@@ -222,5 +221,5 @@ def fetch_article(url: str) -> FetchedArticle:
     return FetchedArticle(url=current, title=title[:300], text=text)
 
 
-def looks_like_url(value: Optional[str]) -> bool:
-    return bool(value) and bool(re.fullmatch(r"https?://\S+", value.strip(), re.I))
+def looks_like_url(value: str | None) -> bool:
+    return bool(value) and bool(re.fullmatch(r"https?://\S+", value.strip(), re.IGNORECASE))

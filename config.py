@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,9 +30,9 @@ class Settings(BaseSettings):
 
     # Back-compat: honoured only if explicitly set in .env. MOCK_MODE=true
     # downgrades the two stages it used to gate.
-    MOCK_MODE: Optional[bool] = None
-    EVIDENCE_MOCK_MODE: Optional[bool] = None
-    ENSEMBLE_MOCK_MODE: Optional[bool] = None
+    MOCK_MODE: bool | None = None
+    EVIDENCE_MOCK_MODE: bool | None = None
+    ENSEMBLE_MOCK_MODE: bool | None = None
 
     # ------------------------------------------------------------------
     # NLI (claim verification)
@@ -105,17 +103,17 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # LLM
     # ------------------------------------------------------------------
-    ANTHROPIC_API_KEY: Optional[str] = None
-    OPENAI_API_KEY: Optional[str] = None
+    ANTHROPIC_API_KEY: str | None = None
+    OPENAI_API_KEY: str | None = None
     LLM_PROVIDER: str = "anthropic"           # "anthropic" | "openai"
     LLM_MODEL: str = "claude-opus-5-5"     # claim extraction + translation
 
     # ------------------------------------------------------------------
     # Search APIs
     # ------------------------------------------------------------------
-    NEWS_API_KEY: Optional[str] = None        # newsapi.org — trusted-outlet headline search
-    TAVILY_API_KEY: Optional[str] = None
-    SERPAPI_KEY: Optional[str] = None
+    NEWS_API_KEY: str | None = None        # newsapi.org — trusted-outlet headline search
+    TAVILY_API_KEY: str | None = None
+    SERPAPI_KEY: str | None = None
     SEARCH_PROVIDER: str = "newsapi"          # "newsapi" | "wikipedia" | "tavily" | "serpapi"
 
     # ------------------------------------------------------------------
@@ -138,7 +136,7 @@ class Settings(BaseSettings):
     # newsdata  — newsdata.io (free tier key in NEWSDATA_API_KEY)
     # none      — no regional news search
     REGIONAL_NEWS_PROVIDER: str = "gnews_rss"
-    NEWSDATA_API_KEY: Optional[str] = None
+    NEWSDATA_API_KEY: str | None = None
     REGION_MAX_QUERIES: int = 3            # scopes tried per claim, most specific first
     REGION_MIN_SNIPPETS: int = 2           # widen the scope until this many are found
     REGION_MAX_EXTRA_SNIPPETS: int = 2     # regional snippets allowed on top of the usual cap
@@ -187,7 +185,7 @@ class Settings(BaseSettings):
     # Google sign-in. The OAuth 2.0 Web client ID from Google Cloud Console.
     # Unset = the "Continue with Google" button reports it isn't configured.
     # The frontend needs the same value in NEXT_PUBLIC_GOOGLE_CLIENT_ID.
-    GOOGLE_CLIENT_ID: Optional[str] = None
+    GOOGLE_CLIENT_ID: str | None = None
 
     # Seed a ready-to-use test account at startup (see README "Test account").
     SEED_TEST_USER: bool = True
@@ -214,6 +212,9 @@ class Settings(BaseSettings):
     ESCALATION_LOW: float = 0.4
     ESCALATION_HIGH: float = 0.6
     STAGE_TIMEOUT_S: float = 90.0
+    # Translation and claim extraction call an LLM that thinks before answering;
+    # on a long article that legitimately takes longer than the network stages.
+    LLM_STAGE_TIMEOUT_S: float = 300.0
     # Kept low deliberately. Retrieval is network-bound so threads help, but
     # Wikipedia rate-limits the extracts API aggressively — at 6 workers the
     # backoff pinned itself at its ceiling and the stage timed out, which

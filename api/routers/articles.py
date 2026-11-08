@@ -12,9 +12,19 @@ import logging
 import os
 import secrets
 import tempfile
-from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -60,15 +70,15 @@ MAX_ARTICLE_TEXT_LEN = 50_000
 
 
 class ArticleSubmitRequest(BaseModel):
-    text: Optional[str] = Field(
+    text: str | None = Field(
         None, min_length=5, max_length=MAX_ARTICLE_TEXT_LEN,
         description="Raw article text",
     )
-    conversation_id: Optional[int] = Field(
+    conversation_id: int | None = Field(
         None, description="Signed-in only: append to this chat. Omit to start a new chat.",
     )
-    url:  Optional[str] = Field(None, max_length=2048, description="Source URL (stored for reference)")
-    region: Optional[str] = Field(
+    url:  str | None = Field(None, max_length=2048, description="Source URL (stored for reference)")
+    region: str | None = Field(
         None, max_length=120,
         description="Optional place the article is about (e.g. 'Pune' or 'Kerala'). "
                     "Used as context when the text does not name its location.",
@@ -88,20 +98,20 @@ class ArticleSubmitRequest(BaseModel):
 
 class LocationOut(BaseModel):
     """Where a claim is about, resolved as precisely as the text allows."""
-    name:         Optional[str] = None
-    label:        Optional[str] = None      # "Koregaon Park, Pune, Maharashtra, India"
-    level:        Optional[str] = None      # site | street | locality | city | district | state | country
-    lat:          Optional[float] = None
-    lon:          Optional[float] = None
-    country:      Optional[str] = None
-    country_code: Optional[str] = None
-    state:        Optional[str] = None
-    district:     Optional[str] = None
-    city:         Optional[str] = None
-    locality:     Optional[str] = None
+    name:         str | None = None
+    label:        str | None = None      # "Koregaon Park, Pune, Maharashtra, India"
+    level:        str | None = None      # site | street | locality | city | district | state | country
+    lat:          float | None = None
+    lon:          float | None = None
+    country:      str | None = None
+    country_code: str | None = None
+    state:        str | None = None
+    district:     str | None = None
+    city:         str | None = None
+    locality:     str | None = None
     confidence:   float = 0.0
-    method:       Optional[str] = None      # nominatim | gazetteer | user
-    source:       Optional[str] = None      # claim | article | user
+    method:       str | None = None      # nominatim | gazetteer | user
+    source:       str | None = None      # claim | article | user
     mentions:     list[str] = []
     ambiguous:    bool = False
     also:         list[dict] = []           # other places named in the same claim
@@ -128,8 +138,8 @@ class ClaimVerdictOut(BaseModel):
 
     # Region-aware verification. All optional: absent for claims with no place,
     # and for verdict rows stored before this existed.
-    location:          Optional[LocationOut] = None
-    search_scope:      Optional[str] = None    # narrowest region that returned evidence
+    location:          LocationOut | None = None
+    search_scope:      str | None = None    # narrowest region that returned evidence
     regional_evidence: int = 0                 # evidence snippets from the claim's region
     in_region:         list[bool] = []         # parallel to evidence_snippets
     event_corroborated: bool = False           # recent independent outlets report the same event
@@ -152,9 +162,9 @@ class VerdictOut(BaseModel):
     claim_verdicts:     list[ClaimVerdictOut]
     ensemble_score:     float
     reasoning_trace:    str
-    ai_model_version:   Optional[str]
+    ai_model_version:   str | None
     created_at:         str
-    fused_score:        Optional[float] = None
+    fused_score:        float | None = None
     degradations:       list[DegradationOut] = []
 
     model_config = ConfigDict(from_attributes=True)
@@ -165,9 +175,9 @@ FEEDBACK_REASONS = {"wrong_verdict", "bad_sources", "missed_claim", "other"}
 
 class FeedbackIn(BaseModel):
     rating: int = Field(..., description="+1 (helpful) or -1 (wrong)")
-    reason: Optional[str] = Field(
+    reason: str | None = Field(
         None, description="For -1: wrong_verdict | bad_sources | missed_claim | other")
-    comment: Optional[str] = Field(None, max_length=1000)
+    comment: str | None = Field(None, max_length=1000)
 
     @model_validator(mode="after")
     def _check(self):
@@ -182,8 +192,8 @@ class FeedbackIn(BaseModel):
 
 class FeedbackOut(BaseModel):
     rating: int
-    reason: Optional[str] = None
-    comment: Optional[str] = None
+    reason: str | None = None
+    comment: str | None = None
 
 
 class ShareOut(BaseModel):
@@ -193,21 +203,21 @@ class ShareOut(BaseModel):
 
 class ArticleOut(BaseModel):
     id:           int
-    url:          Optional[str]
+    url:          str | None
     text_preview: str           # first 200 chars
     status:       str           # pending | processing | completed | failed
     submitted_at: str
-    stage:        Optional[str] = None
-    kind:         Optional[str] = None          # text | image | url
-    conversation_id: Optional[int] = None       # None for a signed-out (guest) query
-    source_title: Optional[str] = None          # link checks: the page's title
-    error:        Optional[str] = None          # why a failed check failed
+    stage:        str | None = None
+    kind:         str | None = None          # text | image | url
+    conversation_id: int | None = None       # None for a signed-out (guest) query
+    source_title: str | None = None          # link checks: the page's title
+    error:        str | None = None          # why a failed check failed
     # Full checked text (pasted, OCR'd or fetched) once the check is complete,
     # so the UI can highlight claims in it. Omitted while processing.
-    full_text:    Optional[str] = None
-    share_slug:   Optional[str] = None
-    feedback:     Optional[FeedbackOut] = None  # the owner's rating, if any
-    verdict:      Optional[VerdictOut] = None
+    full_text:    str | None = None
+    share_slug:   str | None = None
+    feedback:     FeedbackOut | None = None  # the owner's rating, if any
+    verdict:      VerdictOut | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -251,7 +261,7 @@ def _build_article_out(article: Article) -> ArticleOut:
     )
 
 
-def _owner_feedback(article: Article) -> Optional[FeedbackOut]:
+def _owner_feedback(article: Article) -> FeedbackOut | None:
     if article.user_id is None:
         return None
     for f in article.feedback:
@@ -269,8 +279,8 @@ def _chat_title(text: str) -> str:
 def _assign_owner(
     db: Session,
     request: Request,
-    user: Optional[dict],
-    conversation_id: Optional[int],
+    user: dict | None,
+    conversation_id: int | None,
     title_text: str,
 ) -> dict:
     """
@@ -299,15 +309,15 @@ def _assign_owner(
     return {"user_id": user["id"], "conversation_id": conv.id, "guest_key": None}
 
 
-def _can_read(article: Article, user: Optional[dict]) -> bool:
+def _can_read(article: Article, user: dict | None) -> bool:
     """Owned articles are private to their owner (admins see everything)."""
     if article.user_id is None:
         return True
     return user is not None and (user["id"] == article.user_id or user["role"] == "admin")
 
 
-def _run_pipeline_job(article_id: int, text: str, url: Optional[str],
-                      region: Optional[str] = None) -> None:
+def _run_pipeline_job(article_id: int, text: str, url: str | None,
+                      region: str | None = None) -> None:
     """
     Background worker: run the pipeline and persist the result.
 
@@ -370,8 +380,8 @@ def _run_pipeline_job(article_id: int, text: str, url: Optional[str],
         log.info("pipeline job: article_id=%d done — %s (%.3f)",
                  article_id, vr.verdict, vr.confidence)
 
-    except Exception as exc:
-        log.error("pipeline job: article_id=%d failed — %s", article_id, exc, exc_info=True)
+    except Exception:
+        log.exception("pipeline job: article_id=%d failed", article_id)
         db.rollback()
         try:
             article = db.get(Article, article_id)
@@ -386,8 +396,8 @@ def _run_pipeline_job(article_id: int, text: str, url: Optional[str],
         db.close()
 
 
-def _run_pipeline_image_job(article_id: int, image_path: str, url: Optional[str],
-                            region: Optional[str] = None) -> None:
+def _run_pipeline_image_job(article_id: int, image_path: str, url: str | None,
+                            region: str | None = None) -> None:
     """
     Background worker for an image submission: OCR the image, run the same
     evidence-grounded pipeline used for text, persist the result, and clean up
@@ -435,8 +445,8 @@ def _run_pipeline_image_job(article_id: int, image_path: str, url: Optional[str]
         log.info("pipeline job (image): article_id=%d done — %s (%.3f)",
                  article_id, vr.verdict, vr.confidence)
 
-    except Exception as exc:
-        log.error("pipeline job (image): article_id=%d failed — %s", article_id, exc, exc_info=True)
+    except Exception:
+        log.exception("pipeline job (image): article_id=%d failed", article_id)
         db.rollback()
         try:
             article = db.get(Article, article_id)
@@ -468,7 +478,7 @@ def submit_article(
     background: BackgroundTasks,
     request: Request,
     db: Session = Depends(get_db),
-    user: Optional[dict] = Depends(get_optional_user),
+    user: dict | None = Depends(get_optional_user),
 ) -> ArticleOut:
     """
     Submit a news article for automated fake-news detection: as `text`, or
@@ -528,11 +538,11 @@ async def submit_article_image(
     background: BackgroundTasks,
     request: Request,
     file: UploadFile = File(..., description="Photo or screenshot of the article"),
-    url: Optional[str] = Form(None, max_length=2048),
-    region: Optional[str] = Form(None, max_length=120),
-    conversation_id: Optional[int] = Form(None),
+    url: str | None = Form(None, max_length=2048),
+    region: str | None = Form(None, max_length=120),
+    conversation_id: int | None = Form(None),
     db: Session = Depends(get_db),
-    user: Optional[dict] = Depends(get_optional_user),
+    user: dict | None = Depends(get_optional_user),
 ) -> ArticleOut:
     """
     Submit a photographed or screenshotted article image for verification.
@@ -605,7 +615,7 @@ async def submit_article_image(
 def get_article(
     article_id: int,
     db: Session = Depends(get_db),
-    user: Optional[dict] = Depends(get_optional_user),
+    user: dict | None = Depends(get_optional_user),
 ) -> ArticleOut:
     """
     Retrieve a previously submitted article by its ID, including the full verdict
@@ -623,7 +633,7 @@ def get_article(
 
 # ── Sharing ────────────────────────────────────────────────────────────────────
 
-def _can_manage(article: Article, user: Optional[dict], request: Request) -> bool:
+def _can_manage(article: Article, user: dict | None, request: Request) -> bool:
     """Owner (or admin) of a saved check, or the same client for a guest check."""
     if article.user_id is not None:
         return user is not None and (user["id"] == article.user_id or user["role"] == "admin")
@@ -636,7 +646,7 @@ def share_article(
     article_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: Optional[dict] = Depends(get_optional_user),
+    user: dict | None = Depends(get_optional_user),
 ) -> ShareOut:
     article = db.get(Article, article_id)
     if article is None or not _can_manage(article, user, request):
@@ -655,7 +665,7 @@ def unshare_article(
     article_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: Optional[dict] = Depends(get_optional_user),
+    user: dict | None = Depends(get_optional_user),
 ) -> Response:
     article = db.get(Article, article_id)
     if article is None or not _can_manage(article, user, request):

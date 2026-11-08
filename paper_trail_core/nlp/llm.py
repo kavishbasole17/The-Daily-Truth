@@ -47,7 +47,7 @@ def _parse_json(raw: str) -> dict[str, Any]:
         return json.loads(raw)
     except ValueError:
         pass
-    m = re.search(r"\{.*\}", raw, re.S)   # tolerate ```json fences or a lead-in sentence
+    m = re.search(r"\{.*\}", raw, re.DOTALL)   # tolerate ```json fences or a lead-in sentence
     if not m:
         raise LLMError("LLM reply contained no JSON object")
     return json.loads(m.group(0))
@@ -62,8 +62,8 @@ def complete_json(prompt: str, *, max_tokens: int = 16000) -> dict[str, Any]:
         import anthropic
 
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        kwargs = dict(model=model, max_tokens=max_tokens,
-                      messages=[{"role": "user", "content": prompt}])
+        kwargs = {"model": model, "max_tokens": max_tokens,
+                      "messages": [{"role": "user", "content": prompt}]}
         # Streamed: long translations need a large max_tokens, which the SDK
         # rejects for non-streaming requests (HTTP timeout risk).
         try:

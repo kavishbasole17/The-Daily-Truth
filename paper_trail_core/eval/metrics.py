@@ -17,7 +17,9 @@ curve shows the whole trade-off so an operating point can be chosen honestly.
 """
 from __future__ import annotations
 
-from typing import Any, Sequence
+import math
+from collections.abc import Sequence
+from typing import Any
 
 
 def sanitise(probs: Sequence[float], default: float = 0.5) -> list[float]:
@@ -36,7 +38,7 @@ def sanitise(probs: Sequence[float], default: float = 0.5) -> list[float]:
             v = float(p)
         except (TypeError, ValueError):
             v = default
-        if v != v or v in (float("inf"), float("-inf")):
+        if not math.isfinite(v):   # NaN or ±inf
             v = default
         out.append(max(0.0, min(1.0, v)))
     return out

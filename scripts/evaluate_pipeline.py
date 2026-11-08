@@ -44,7 +44,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -53,11 +53,11 @@ if BASE_DIR not in sys.path:
 
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
-from config import settings  # noqa: E402
-from paper_trail_core.agents.features import FEATURE_NAMES  # noqa: E402
-from paper_trail_core.agents.fusion import heuristic_probability  # noqa: E402
-from paper_trail_core.agents.pipeline import run_verification_pipeline  # noqa: E402
-from paper_trail_core.eval import metrics as M  # noqa: E402
+from config import settings
+from paper_trail_core.agents.features import FEATURE_NAMES
+from paper_trail_core.agents.fusion import heuristic_probability
+from paper_trail_core.agents.pipeline import run_verification_pipeline
+from paper_trail_core.eval import metrics as M
 
 log = logging.getLogger("evaluate_pipeline")
 
@@ -95,7 +95,9 @@ def load_adversarial() -> list[dict[str, Any]]:
 
 def load_holdout(n_per_class: int) -> list[dict[str, Any]]:
     from paper_trail_core.eval.splits import (
-        get_holdout_frame, headline_frame, stratified_sample,
+        get_holdout_frame,
+        headline_frame,
+        stratified_sample,
     )
     frame = headline_frame(get_holdout_frame())
     sample = stratified_sample(frame, n_per_class=n_per_class)
@@ -265,7 +267,7 @@ def build_report(slice_name: str, records: list[dict], target_precision: float) 
 
     report: dict[str, Any] = {
         "slice": slice_name,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "git_sha": _git_sha(),
         "config": {
             "claim_backend": settings.CLAIM_BACKEND,

@@ -28,7 +28,6 @@ downstream.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
@@ -49,7 +48,7 @@ except ImportError:  # pragma: no cover
 
 from paper_trail_core.agents.state import PipelineState
 from paper_trail_core.degradations import degrade
-from paper_trail_core.nlp.lang_id import SUPPORTED_LANGUAGES, detect_language
+from paper_trail_core.nlp.lang_id import detect_language
 from paper_trail_core.nlp.llm import complete_json
 
 log = logging.getLogger(__name__)
@@ -171,7 +170,7 @@ def translate_node(state: PipelineState) -> dict:
     try:
         translated = _llm_translate(text)
     except Exception as exc:
-        log.error("translation_agent: LLM translation failed (%s)", exc, exc_info=True)
+        log.exception("translation_agent: LLM translation failed")
         return {
             **base,
             "translated_text": "",

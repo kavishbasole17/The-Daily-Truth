@@ -37,7 +37,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from preprocess import get_train_test_split, load_all_datasets  # noqa: E402
+from preprocess import get_train_test_split, load_all_datasets
 
 log = logging.getLogger(__name__)
 

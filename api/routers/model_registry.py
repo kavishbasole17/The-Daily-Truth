@@ -1,8 +1,6 @@
 """GET /models/registry — expose model benchmark data for the analytics dashboard."""
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 
@@ -18,12 +16,12 @@ class ModelRegistryEntry(BaseModel):
     feature_type: str
     loaded:       bool
     path:         str
-    train_time:   Optional[float]
-    accuracy:     Optional[float]
-    f1:           Optional[float]
-    precision:    Optional[float]
-    recall:       Optional[float]
-    auc:          Optional[float]
+    train_time:   float | None
+    accuracy:     float | None
+    f1:           float | None
+    precision:    float | None
+    recall:       float | None
+    auc:          float | None
 
 
 class RegistryResponse(BaseModel):
@@ -54,10 +52,10 @@ def _to_schema(e: ModelEntry) -> ModelRegistryEntry:
     summary="Model registry — benchmark metrics for all trained models",
 )
 def get_registry(
-    category:     Optional[str] = Query(None, description="Filter: Classical ML | Deep Learning | Hybrid"),
-    feature_type: Optional[str] = Query(None, description="Filter: tfidf | dense | sequence | hybrid"),
+    category:     str | None = Query(None, description="Filter: Classical ML | Deep Learning | Hybrid"),
+    feature_type: str | None = Query(None, description="Filter: tfidf | dense | sequence | hybrid"),
     sort_by:      str           = Query("f1", description="Sort metric: accuracy|f1|precision|recall|auc"),
-    top_n:        Optional[int] = Query(None, description="Return only the top-N results"),
+    top_n:        int | None = Query(None, description="Return only the top-N results"),
 ) -> RegistryResponse:
     """
     Returns benchmark data for every model in `models/registry.json`.

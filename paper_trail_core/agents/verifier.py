@@ -313,7 +313,7 @@ def _attach_event_corroboration(cv: ClaimVerdict, claim: str, snippets: list[dic
             min_sources=settings.EVENT_MIN_SOURCES,
             max_age_days=settings.EVENT_MAX_AGE_DAYS,
         )
-    except Exception:   # noqa: BLE001 — corroboration is optional context
+    except Exception:
         log.exception("verifier: event corroboration failed")
         return
     cv["event_corroborated"] = bool(c["corroborated"])

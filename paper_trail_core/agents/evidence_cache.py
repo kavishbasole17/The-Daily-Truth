@@ -22,7 +22,7 @@ import os
 import re
 import sys
 import time
-from typing import Any, Optional
+from typing import Any
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
@@ -46,10 +46,10 @@ def _normalise(query: str) -> str:
 
 
 def cache_key(provider: str, query: str) -> str:
-    return hashlib.sha256(f"{provider}|{_normalise(query)}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{provider}|{_normalise(query)}".encode()).hexdigest()
 
 
-def _path_for(key: str, base_dir: Optional[str] = None) -> str:
+def _path_for(key: str, base_dir: str | None = None) -> str:
     # Two-level fan-out: a flat directory with tens of thousands of files gets
     # painfully slow to enumerate on Windows.
     root = base_dir or _DIR
@@ -61,9 +61,9 @@ def _path_for(key: str, base_dir: Optional[str] = None) -> str:
 def get(
     provider: str,
     query: str,
-    ttl_days: Optional[int] = None,
-    base_dir: Optional[str] = None,
-) -> Optional[list[dict[str, Any]]]:
+    ttl_days: int | None = None,
+    base_dir: str | None = None,
+) -> list[dict[str, Any]] | None:
     """
     Cached results, or None on miss/expiry.
 
@@ -94,7 +94,7 @@ def put(
     provider: str,
     query: str,
     results: list[dict[str, Any]],
-    base_dir: Optional[str] = None,
+    base_dir: str | None = None,
 ) -> None:
     """Store results. Written atomically so a crash cannot leave a partial entry."""
     path = _path_for(cache_key(provider, query), base_dir)
@@ -114,7 +114,7 @@ def put(
         log.warning("evidence_cache: could not write %s (%s)", path, exc)
 
 
-def stats(base_dir: Optional[str] = None) -> dict[str, Any]:
+def stats(base_dir: str | None = None) -> dict[str, Any]:
     root = base_dir or _DIR
     if not os.path.isabs(root):
         root = os.path.join(_ROOT, root)

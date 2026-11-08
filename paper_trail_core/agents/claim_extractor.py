@@ -20,10 +20,9 @@ more here than a better default that silently degrades.
 """
 from __future__ import annotations
 
-import json
 import logging
-import re
 import os
+import re
 import sys
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -49,8 +48,8 @@ from paper_trail_core.nlp.checkworthiness import (
     deduplicate,
     is_eligible,
 )
-from paper_trail_core.nlp.segmentation import segment_sentences
 from paper_trail_core.nlp.llm import complete_json, llm_configured
+from paper_trail_core.nlp.segmentation import segment_sentences
 
 # Text sent to the LLM extractor. Matches the pipeline's MAX_ARTICLE_CHARS
 # (50k) — the extractor sees the whole article, not just its opening.

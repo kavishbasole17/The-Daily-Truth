@@ -12,7 +12,7 @@ import ErrorState from "@/components/ErrorState";
 import EmptyState from "@/components/EmptyState";
 import Footer from "@/components/Footer";
 
-import { consensusPredict } from "@/services/api";
+import { consensusPredict, errorMessage } from "@/services/api";
 
 import "@/styles/pages.css";
 
@@ -37,11 +37,8 @@ export default function ConsensusPage() {
 
             setResult(data);
         } catch (err) {
-            setError(
-                err?.response?.data?.detail ||
-                err?.response?.data?.message ||
-                "Failed to analyze article."
-            );
+            // detail can be a list of validation errors, not a string
+            setError(errorMessage(err, "Failed to analyze article."));
         } finally {
             setLoading(false);
         }

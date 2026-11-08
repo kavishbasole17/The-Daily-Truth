@@ -76,6 +76,17 @@ def run_ensemble_node(state: PipelineState) -> dict:
         result = registry.predict(text, "hybrid_stacking", threshold=0.5)
         score = round(result["prob_real"], 4)
         log.info("ensemble_agent: ensemble_score=%.4f", score)
+        missing = registry.missing_hybrid_bases()
+        if missing:
+            return {
+                "ensemble_score": score,
+                "degradations": degrade(
+                    "ensemble", "base_models_missing",
+                    f"{len(missing)} of the stacking ensemble's base models aren't loaded "
+                    f"({', '.join(missing)}); each was replaced with a neutral 0.5. "
+                    "Install the missing packages (e.g. tensorflow) for full accuracy.",
+                ),
+            }
         return {"ensemble_score": score, "degradations": []}
     except Exception as exc:
         log.error("ensemble_agent: prediction failed (%s), falling back to 0.5", exc)

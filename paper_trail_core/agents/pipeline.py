@@ -45,9 +45,10 @@ import json
 import logging
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
-from typing import Callable, Optional
 
 from langgraph.graph import END, StateGraph
 
@@ -58,8 +59,10 @@ if _ROOT not in sys.path:
 try:
     from config import settings
     _STAGE_TIMEOUT = settings.STAGE_TIMEOUT_S
+    _LLM_STAGE_TIMEOUT = settings.LLM_STAGE_TIMEOUT_S
 except ImportError:  # pragma: no cover
     _STAGE_TIMEOUT = 45.0
+    _LLM_STAGE_TIMEOUT = 300.0
 
 from paper_trail_core.agents.adjudicator import adjudicate_node
 from paper_trail_core.agents.claim_extractor import extract_claims_node
@@ -193,9 +196,11 @@ def with_stage_guard(
     that blocks indefinitely) is worse.
     """
     def _wrapped(state: PipelineState) -> dict:
+        # Not a `with` block: leaving one calls shutdown(wait=True), which
+        # blocks until the timed-out stage finishes and defeats the timeout.
+        pool = ThreadPoolExecutor(max_workers=1)
         try:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(fn, state).result(timeout=timeout_s)
+            return pool.submit(fn, state).result(timeout=timeout_s)
         except FutureTimeout:
             log.error("pipeline: stage %s timed out after %.0fs", stage, timeout_s)
             out = dict(fallback(state))
@@ -213,7 +218,7 @@ def with_stage_guard(
             # never carry raw exception text — that can include internal
             # paths, provider error bodies, or (for the LLM claim-extraction
             # backend) fragments of a misconfigured API key.
-            log.error("pipeline: stage %s failed — %s", stage, exc, exc_info=True)
+            log.exception("pipeline: stage %s failed", stage)
             out = dict(fallback(state))
             out["degradations"] = degrade(
                 stage, "stage_error",
@@ -222,6 +227,10 @@ def with_stage_guard(
                 severity="critical",
             )
             return out
+        finally:
+            # Release the worker without waiting: a timed-out stage finishes
+            # in the background and its result is discarded.
+            pool.shutdown(wait=False, cancel_futures=True)
     return _wrapped
 
 
@@ -245,10 +254,12 @@ def _build_graph() -> StateGraph:
     g.add_node("ocr",
                with_stage_guard(ocr_node, "ocr", _fallback_ocr))
     g.add_node("translate",
-               with_stage_guard(translate_node, "translation", _fallback_translate))
+               with_stage_guard(translate_node, "translation", _fallback_translate,
+                                timeout_s=_LLM_STAGE_TIMEOUT))
     g.add_node("abstain", _abstain_node)
     g.add_node("extract_claims",
-               with_stage_guard(extract_claims_node, "claim_extractor", _fallback_claims))
+               with_stage_guard(extract_claims_node, "claim_extractor", _fallback_claims,
+                                timeout_s=_LLM_STAGE_TIMEOUT))
     g.add_node("locate",
                with_stage_guard(locate_node, "locator", _fallback_locate))
     g.add_node("retrieve_evidence",
@@ -342,7 +353,7 @@ def _guarded_result(verdict: str, trace: str, degradations: list[Degradation]) -
     )
 
 
-def _base_state(url: Optional[str], region_hint: Optional[str] = None) -> dict:
+def _base_state(url: str | None, region_hint: str | None = None) -> dict:
     """Fields common to every entry path, before input-type-specific ones are set."""
     return {
         "url":               url,
@@ -385,7 +396,7 @@ def _run_graph(initial_state: PipelineState) -> VerdictResult:
         # itself fails we still owe the caller a well-formed answer. As above,
         # raw exception text never goes into a field the public, unauthenticated
         # GET /articles/{id} endpoint returns — only the server log gets it.
-        log.error("pipeline: unexpected error — %s", exc, exc_info=True)
+        log.exception("pipeline: unexpected error")
         return _guarded_result(
             "uncertain",
             "Verification could not be completed due to an internal error.",
@@ -414,8 +425,8 @@ def _run_graph(initial_state: PipelineState) -> VerdictResult:
 
 def run_verification_pipeline(
     article_text: str,
-    url: Optional[str] = None,
-    region_hint: Optional[str] = None,
+    url: str | None = None,
+    region_hint: str | None = None,
 ) -> VerdictResult:
     """
     Run the full multi-agent verification pipeline over plain text.
@@ -429,11 +440,8 @@ def run_verification_pipeline(
 
     # Input guards — reject before spending model time, with a real explanation.
     min_chars = MIN_ARTICLE_CHARS
-    try:
-        if settings.CLAIM_MODE:
-            min_chars = min(min_chars, int(settings.CLAIM_MODE_MIN_CHARS))
-    except Exception:  # pragma: no cover
-        pass
+    if getattr(settings, "CLAIM_MODE", False):
+        min_chars = min(min_chars, int(getattr(settings, "CLAIM_MODE_MIN_CHARS", min_chars)))
     if len(text) < min_chars:
         return _guarded_result(
             "uncertain",
@@ -452,8 +460,8 @@ def run_verification_pipeline(
 
 def run_verification_pipeline_image(
     image_path: str,
-    url: Optional[str] = None,
-    region_hint: Optional[str] = None,
+    url: str | None = None,
+    region_hint: str | None = None,
 ) -> VerdictResult:
     """
     Run the full multi-agent verification pipeline over an image.

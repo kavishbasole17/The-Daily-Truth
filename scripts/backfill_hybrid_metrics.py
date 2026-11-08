@@ -53,7 +53,11 @@ def _get_prob(model, X):
 
 def compute_metrics(model, X_te, y_te) -> dict:
     from sklearn.metrics import (
-        accuracy_score, f1_score, precision_score, recall_score, roc_auc_score,
+        accuracy_score,
+        f1_score,
+        precision_score,
+        recall_score,
+        roc_auc_score,
     )
 
     y_pred = model.predict(X_te)
@@ -90,7 +94,7 @@ def main() -> int:
           f"{base_model_names}")
 
     # ── Reproduce the exact test split (test-only; oversampling never touches it) ──
-    from preprocess import load_all_datasets, get_train_test_split
+    from preprocess import get_train_test_split, load_all_datasets
 
     df = load_all_datasets()
     _, X_test, _, y_test = get_train_test_split(df)
@@ -108,8 +112,8 @@ def main() -> int:
     dl_models: dict[str, object] = {}
     if needs_dl:
         import tensorflow as tf
-        from tensorflow.keras.preprocessing.text import tokenizer_from_json
         from tensorflow.keras.preprocessing.sequence import pad_sequences
+        from tensorflow.keras.preprocessing.text import tokenizer_from_json
 
         with open(os.path.join(DL_DIR, "tokenizer.json")) as f:
             tokenizer = tokenizer_from_json(f.read())

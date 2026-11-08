@@ -47,27 +47,35 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from api.schemas import (
-    BenchmarkRow, ChartInfo, ChartsListResponse,
-    HealthResponse, ModelInfo, ModelsListResponse,
-    PredictAllRequest, PredictAllResponse,
-    PredictBatchRequest, PredictBatchResponse,
-    PredictRequest, PredictResponse,
-    ResultsResponse, SinglePrediction,
-)
-from api.model_loader import ModelRegistry, clean_text
 from api.database import create_tables, ensure_columns
+from api.model_loader import ModelRegistry, clean_text
+from api.schemas import (
+    BenchmarkRow,
+    ChartInfo,
+    ChartsListResponse,
+    HealthResponse,
+    ModelInfo,
+    ModelsListResponse,
+    PredictAllRequest,
+    PredictAllResponse,
+    PredictBatchRequest,
+    PredictBatchResponse,
+    PredictRequest,
+    PredictResponse,
+    ResultsResponse,
+    SinglePrediction,
+)
 
 try:
     from config import settings
 except ImportError:  # pragma: no cover
     settings = None
-from api.routers import auth as auth_router
-from api.routers import articles as articles_router
-from api.routers import model_registry as reg_router
-from api.routers import conversations as conversations_router
-from api.routers import share as share_router
 from api.auth import seed_users
+from api.routers import articles as articles_router
+from api.routers import auth as auth_router
+from api.routers import conversations as conversations_router
+from api.routers import model_registry as reg_router
+from api.routers import share as share_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -133,6 +141,12 @@ async def lifespan(app: FastAPI):
                 f'Could not warm verification models: {e}. The pipeline will '
                 'load them on first use, or degrade and say so.'
             )
+
+    if settings is not None and settings.JWT_SECRET_KEY.startswith('dev-secret'):
+        logger.warning(
+            'JWT_SECRET_KEY is the built-in default: anyone who knows it can forge '
+            'login tokens. Set a long random JWT_SECRET_KEY in .env before deploying.'
+        )
 
     # Say loudly, at startup, if any stage will run below full accuracy.
     from api.accuracy import log_report
@@ -385,7 +399,7 @@ async def get_results() -> ResultsResponse:
 async def list_charts() -> ChartsListResponse:
     """Lists benchmark chart images available to serve."""
     charts = []
-    for name, _ in CHART_META.items():
+    for name in CHART_META:
         path = os.path.join(RESULTS_DIR, f'{name}.png')
         if os.path.exists(path):
             charts.append(ChartInfo(

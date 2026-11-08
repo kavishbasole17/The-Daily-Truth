@@ -116,3 +116,44 @@ def test_accuracy_report_flags_degraded_backends(monkeypatch):
     by = {s["stage"]: s for s in accuracy_report()["stages"]}
     assert by["nli"]["full_accuracy"] is False and "NLI_BACKEND=transformer" in by["nli"]["fix"]
     assert by["evidence_retrieval"]["full_accuracy"] is False
+
+
+def test_stage_timeout_returns_within_budget():
+    """Regression: leaving a `with ThreadPoolExecutor` block waited for the
+    timed-out stage, so a hung stage held the request for its full duration."""
+    import time
+
+    from paper_trail_core.agents.pipeline import with_stage_guard
+
+    def slow(_state):
+        time.sleep(2.0)
+        return {"claims": ["late"]}
+
+    guarded = with_stage_guard(slow, "test_stage", lambda s: {"claims": []}, timeout_s=0.2)
+    start = time.monotonic()
+    out = guarded({})
+    assert time.monotonic() - start < 1.0
+    assert out["claims"] == []
+    assert out["degradations"][0]["kind"] == "timeout"
+
+
+def test_missing_stacking_base_models_are_reported(monkeypatch):
+    """Regression: base models that failed to load were silently replaced with
+    0.5 inside the stacking ensemble, with no degradation on the verdict."""
+    from paper_trail_core.agents import stylistic_ensemble_agent as ens
+
+    class FakeRegistry:
+        hybrid_count = 1
+
+        def predict(self, text, name, threshold=0.5):
+            return {"prob_real": 0.7}
+
+        def missing_hybrid_bases(self):
+            return ["lstm", "gru"]
+
+    monkeypatch.setattr(ens, "_MOCK", False)
+    monkeypatch.setattr(ens, "_get_registry", lambda: FakeRegistry())
+    out = ens.run_ensemble_node({"article_text": "Some article text."})
+    assert out["ensemble_score"] == 0.7
+    assert out["degradations"][0]["kind"] == "base_models_missing"
+    assert "lstm, gru" in out["degradations"][0]["detail"]

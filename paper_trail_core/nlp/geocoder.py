@@ -24,7 +24,7 @@ import os
 import sys
 import threading
 import time
-from typing import Any, Optional
+from typing import Any
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
@@ -77,7 +77,7 @@ def _cache_dir() -> str:
     return d if os.path.isabs(d) else os.path.join(_ROOT, d)
 
 
-def _key(query: str, countrycodes: Optional[str]) -> str:
+def _key(query: str, countrycodes: str | None) -> str:
     # "v2": results now carry alternative names (namedetails), so v1 entries are stale.
     raw = f"v2|{' '.join(query.lower().split())}|{(countrycodes or '').lower()}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -87,7 +87,7 @@ def _path(key: str) -> str:
     return os.path.join(_cache_dir(), key[:2], f"{key}.json")
 
 
-def _cache_get(key: str) -> Optional[list[dict[str, Any]]]:
+def _cache_get(key: str) -> list[dict[str, Any]] | None:
     path = _path(key)
     if not os.path.exists(path):
         return None
@@ -174,7 +174,7 @@ def _normalise(raw: dict[str, Any]) -> dict[str, Any]:
 
 def geocode(
     query: str,
-    countrycodes: Optional[str] = None,
+    countrycodes: str | None = None,
     limit: int = 5,
 ) -> list[dict[str, Any]]:
     """
@@ -204,7 +204,7 @@ def geocode(
     if countrycodes:
         params["countrycodes"] = countrycodes
 
-    last_exc: Optional[Exception] = None
+    last_exc: Exception | None = None
     for attempt in range(2):
         _throttle()
         try:

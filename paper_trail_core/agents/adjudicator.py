@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from typing import Any, Optional
+from typing import Any
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _ROOT not in sys.path:
@@ -74,7 +74,7 @@ def _build_trace(
     low: float,
     high: float,
     degradations: list,
-    forced_reason: Optional[str] = None,
+    forced_reason: str | None = None,
 ) -> str:
     n = {v: sum(1 for c in claim_verdicts if c.get("verdict") == v)
          for v in ("entailment", "contradiction", "neutral", "unverifiable")}
@@ -127,11 +127,11 @@ def _build_trace(
 def compute_verdict(
     ensemble_score: float,
     claim_verdicts: list[ClaimVerdict],
-    retrieval_stats: Optional[dict] = None,
+    retrieval_stats: dict | None = None,
     nli_degraded: bool = False,
     fusion_payload: Any = _SENTINEL,
-    escalation_low: Optional[float] = None,
-    escalation_high: Optional[float] = None,
+    escalation_low: float | None = None,
+    escalation_high: float | None = None,
 ) -> dict:
     """
     Pure function: signals in, verdict out. No LangGraph state, no I/O.
@@ -180,10 +180,10 @@ def compute_verdict(
 def compute_claim_verdict(
     ensemble_score: float,
     claim_verdicts: list[ClaimVerdict],
-    retrieval_stats: Optional[dict] = None,
+    retrieval_stats: dict | None = None,
     nli_degraded: bool = False,
-    entail_min: Optional[float] = None,
-    contradict_min: Optional[float] = None,
+    entail_min: float | None = None,
+    contradict_min: float | None = None,
 ) -> dict:
     """
     Verdict for a short input, decided on evidence alone.

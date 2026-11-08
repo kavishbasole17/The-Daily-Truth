@@ -24,8 +24,8 @@ log = logging.getLogger(__name__)
 # some other language the evidence comes back neutral and the verdict is
 # uncertain, a safe failure, where a wrong rejection of English is not.
 _ENGLISH_ANCHORS = frozenset(
-    "the of and with that this from which its been were are have has by".split())
-_ENGLISH_COMMON = frozenset("is was to for in it as be on at".split())
+    ["the", "of", "and", "with", "that", "this", "from", "which", "its", "been", "were", "are", "have", "has", "by"])
+_ENGLISH_COMMON = frozenset(["is", "was", "to", "for", "in", "it", "as", "be", "on", "at"])
 SHORT_ASCII_MAX_CHARS = 200
 
 

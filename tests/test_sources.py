@@ -1,4 +1,5 @@
 import pytest
+
 from paper_trail_core.agents.sources import TRUSTED_NEWS_DOMAINS, is_indian, trust_for
 
 
