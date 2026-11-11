@@ -56,7 +56,13 @@ def get_embedder():
     with _lock:
         if _model is not None:
             return _model
+        from paper_trail_core.nlp.openmp import load_before_torch
+        load_before_torch()         # see openmp.py: torch first segfaults XGBoost/LightGBM
+        import torch
         from sentence_transformers import SentenceTransformer
+        # Multi-threaded torch deadlocks once XGBoost/LightGBM/TF share the
+        # process (conflicting OpenMP runtimes); one thread is stable.
+        torch.set_num_threads(int(os.environ.get("TORCH_NUM_THREADS", "1")))
         device = _resolve_device()
         log.info("embeddings: loading %s on %s", _MODEL_NAME, device)
         _model = SentenceTransformer(_MODEL_NAME, device=device)

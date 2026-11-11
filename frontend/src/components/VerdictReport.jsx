@@ -9,6 +9,7 @@
 
 import { useState } from "react";
 
+import PropagationGraph from "@/components/PropagationGraph";
 import { highlightSegments } from "@/lib/highlight";
 
 export const VERDICT_META = {
@@ -116,6 +117,88 @@ function SourceLine({ cv, j }) {
             {date && <span className="evidence-date">{date}</span>}
             {cv.in_region?.[j] && <span className="evidence-source evidence-local">local</span>}
         </span>
+    );
+}
+
+const ORIGIN_KIND = {
+    repeats: { label: "repeats claim", className: "origin-chip-repeats" },
+    debunks: { label: "contradicts claim", className: "origin-chip-debunks" },
+    // Wider-search hit judged without the NLI model: about the claim, stance unknown.
+    mentions: { label: "mentions claim", className: "origin-chip-neutral" },
+};
+
+// A fact-check rated "True" confirms the claim; anything else counts against it.
+function isConfirmingRating(label) {
+    const r = (label || "").toLowerCase();
+    return /\b(true|correct|accurate)\b/.test(r) && !/(not true|untrue|false|partly|half)/.test(r);
+}
+
+function safeHref(url) {
+    return /^https?:\/\//i.test(url || "") ? url : null;
+}
+
+/** Where a claim was first seen and who repeated or checked it, as a graph and a list. */
+function OriginTrail({ origin }) {
+    const timeline = origin.timeline || [];
+    return (
+        <div className="origin-trail">
+            <div className="origin-trail-title">
+                Origin trail
+                <span className="muted"> · earliest source found, not proof of origin</span>
+            </div>
+            {origin.claimant && (
+                <p className="origin-claimant">
+                    Claimed by <strong>{origin.claimant}</strong>
+                    {origin.claim_date && <> on {origin.claim_date}</>}
+                    {origin.claimant_source && (
+                        <span className="muted"> · per {origin.claimant_source} fact-check</span>
+                    )}
+                </p>
+            )}
+            <PropagationGraph origin={origin} />
+            {timeline.length === 0 ? (
+                <p className="muted">No source found repeating or checking this claim.</p>
+            ) : (
+                <ol className="origin-timeline">
+                    {timeline.map((e, j) => {
+                        const isFactCheck = e.kind === "fact_check";
+                        const kind = isFactCheck
+                            ? {
+                                  label: `fact-check: ${e.label || "rated"}`,
+                                  className: isConfirmingRating(e.label)
+                                      ? "origin-chip-neutral"
+                                      : "origin-chip-debunks",
+                              }
+                            : ORIGIN_KIND[e.kind] || { label: e.kind, className: "origin-chip-neutral" };
+                        const href = safeHref(e.url);
+                        const isEarliest =
+                            origin.earliest_seen && e.url && e.url === origin.earliest_seen.url;
+                        return (
+                            <li key={j} className="origin-entry">
+                                <span className="origin-date">{e.date || "undated"}</span>
+                                {href ? (
+                                    <a href={href} target="_blank" rel="noopener noreferrer nofollow"
+                                       className="origin-domain">
+                                        {e.domain || href}
+                                    </a>
+                                ) : (
+                                    <span className="origin-domain">{e.domain || "unknown source"}</span>
+                                )}
+                                <span className={`origin-chip ${kind.className}`}>{kind.label}</span>
+                                {e.found_by === "wider_search" && (
+                                    <span className="origin-chip origin-chip-neutral"
+                                          title="Found by searching beyond trusted outlets; not used for the verdict">
+                                        wider search
+                                    </span>
+                                )}
+                                {isEarliest && <span className="origin-chip origin-chip-earliest">earliest found</span>}
+                                <span className="origin-trust muted">trust {Number(e.trust ?? 0.5).toFixed(2)}</span>
+                            </li>
+                        );
+                    })}
+                </ol>
+            )}
+        </div>
     );
 }
 
@@ -291,6 +374,7 @@ export default function VerdictReport({ result, anchorPrefix, showText = false, 
                                                 ))}
                                             </ul>
                                         )}
+                                        {cv.origin && <OriginTrail origin={cv.origin} />}
                                         {cv.verdict === "unverifiable" && (
                                             <p className="muted">
                                                 No source covering this claim was found. That is not

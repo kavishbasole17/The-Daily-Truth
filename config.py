@@ -171,6 +171,24 @@ class Settings(BaseSettings):
     EVENT_CONFIDENCE_CAP: float = 0.65
 
     # ------------------------------------------------------------------
+    # Origin trail
+    # ------------------------------------------------------------------
+    # For claims the evidence does not support, report who made the claim and
+    # the earliest source found repeating it. Report-only: no verdict or fusion
+    # feature reads it. Fact-check lookup needs a Google Fact Check Tools key
+    # (free: console.cloud.google.com, enable "Fact Check Tools API"); without
+    # one the trail is built from retrieved evidence alone.
+    ORIGIN_TRACE: bool = True
+    GOOGLE_FACTCHECK_API_KEY: str | None = None
+    ORIGIN_MAX_CLAIMS: int = 5             # fact-check lookups per article
+    FACTCHECK_MIN_RELEVANCE: float = 0.6   # claim <-> reviewed-claim cosine to accept a match
+    # Wider search: look for the claim beyond trusted outlets (Google News RSS,
+    # plus SerpAPI/Tavily when keyed), since false claims usually start on
+    # low-trust sites. Only feeds the trail.
+    ORIGIN_WIDE_SEARCH: bool = True
+    ORIGIN_SEARCH_COUNTRY: str = "IN"      # Google News edition when a claim has no place
+
+    # ------------------------------------------------------------------
     # JWT / auth
     # ------------------------------------------------------------------
     JWT_SECRET_KEY: str = "dev-secret-key-CHANGE-IN-PRODUCTION"

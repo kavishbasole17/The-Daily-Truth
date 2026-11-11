@@ -401,6 +401,15 @@ def test_claim_location_round_trips_through_storage(client, admin_token):
         "confidence": 0.8, "evidence_snippets": ["Dam discharge floods Pune."],
         "location": location, "search_scope": "Pune Maharashtra (city)",
         "regional_evidence": 1, "in_region": [True],
+        "evidence_meta": [{"url": "https://punemirror.com/a", "domain": "punemirror.com",
+                           "published_at": "2026-10-28T09:00:00Z", "provider": "newsapi",
+                           "trust": 0.8, "stance": "repeats", "stance_score": 0.91}],
+        "origin": {"basis": "fact_check", "claimant": "Facebook post", "claim_date": "2026-10-27",
+                   "claimant_source": "boomlive.in",
+                   "timeline": [{"date": "2026-10-28", "domain": "punemirror.com",
+                                 "url": "https://punemirror.com/a", "kind": "repeats",
+                                 "label": "", "trust": 0.8}],
+                   "fact_checks": [], "fact_check_status": "ok"},
     }
     vr = VerdictResult(verdict="likely_real", confidence=0.8, claim_verdicts=[claim],
                        ensemble_score=0.7, reasoning_trace="trace")
@@ -415,6 +424,10 @@ def test_claim_location_round_trips_through_storage(client, admin_token):
     assert cv["location"]["country_code"] == "in" and cv["location"]["confidence"] == 0.95
     assert cv["search_scope"] == "Pune Maharashtra (city)"
     assert cv["regional_evidence"] == 1 and cv["in_region"] == [True]
+    assert cv["evidence_meta"][0]["stance"] == "repeats"
+    assert cv["evidence_meta"][0]["published_at"] == "2026-10-28T09:00:00Z"
+    assert cv["origin"]["claimant"] == "Facebook post"
+    assert cv["origin"]["timeline"][0]["kind"] == "repeats"
 
 
 def test_claims_stored_before_regions_existed_still_load(client, admin_token):
@@ -430,6 +443,8 @@ def test_claims_stored_before_regions_existed_still_load(client, admin_token):
     cv = client.get(f"/articles/{resp.json()['id']}",
                     headers={"Authorization": f"Bearer {admin_token}"}).json()["verdict"]["claim_verdicts"][0]
     assert cv["location"] is None and cv["regional_evidence"] == 0 and cv["in_region"] == []
+    assert cv["evidence_meta"] == []
+    assert cv["origin"] is None
 
 
 # ── Model registry endpoint ────────────────────────────────────────────────────

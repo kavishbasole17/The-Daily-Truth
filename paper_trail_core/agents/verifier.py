@@ -220,12 +220,14 @@ def aggregate_claim(
             numeric_conflict=0.0,
             sources=[],
             status=status,
+            evidence_meta=[],
         )
 
     entail_mass = 0.0
     contradict_mass = 0.0
     top_relevance = 0.0
     max_numeric = 0.0
+    evidence_meta: list[dict] = []
 
     for snip, res in zip(snippets, results):
         rel = scale_relevance(float(snip.get("relevance", 0.0)))
@@ -253,6 +255,7 @@ def aggregate_claim(
 
         entail_mass = max(entail_mass, w * p_ent)
         contradict_mass = max(contradict_mass, w * p_con)
+        evidence_meta.append(_provenance(snip, p_ent, p_con))
 
     # A refutation only counts once it clears the higher contradiction bar; a
     # weak one is discounted rather than allowed to drive the article's score.
@@ -289,7 +292,35 @@ def aggregate_claim(
         trust=[round(float(s.get("trust", 0.0) or 0.0), 3) for s in snippets],
         status=status,
         in_region=[bool(s.get("in_region")) for s in snippets],
+        evidence_meta=evidence_meta,
     )
+
+
+def _provenance(snip: dict, p_ent: float, p_con: float) -> dict:
+    """
+    Where one evidence snippet came from and what it says about the claim.
+
+    Stance is read from the unweighted probabilities (after the claim-mode and
+    numeric adjustments above), so it describes the text itself: a low-trust
+    site repeating the claim is still "repeats". Trust is kept alongside so a
+    reader can weigh it. This is the raw material for an origin trail; it plays
+    no part in the verdict.
+    """
+    if p_con >= CONTRADICTION_FLOOR and p_con > p_ent:
+        stance, score = "debunks", p_con
+    elif p_ent >= DECISION_FLOOR and p_ent > p_con:
+        stance, score = "repeats", p_ent
+    else:
+        stance, score = "neutral", max(p_ent, p_con)
+    return {
+        "url": snip.get("url", ""),
+        "domain": snip.get("domain", ""),
+        "published_at": snip.get("published_at", ""),
+        "provider": snip.get("provider", ""),
+        "trust": round(float(snip.get("trust", 0.5)), 4),
+        "stance": stance,
+        "stance_score": round(score, 4),
+    }
 
 
 def _attach_event_corroboration(cv: ClaimVerdict, claim: str, snippets: list[dict]) -> None:

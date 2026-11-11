@@ -110,6 +110,38 @@ def test_support_is_bounded():
     assert -1.0 <= cv["support"] <= 1.0
 
 
+# ── Provenance ────────────────────────────────────────────────────────────────
+
+def test_evidence_meta_is_parallel_and_carries_stance():
+    snippets = [snip("repeats it", domain="viralnews.in"),
+                snip("debunks it", domain="altnews.in"),
+                snip("unrelated", domain="reuters.com")]
+    snippets[0]["published_at"] = "2026-10-28T09:00:00Z"
+    snippets[0]["provider"] = "newsapi"
+    cv = aggregate_claim("A claim.", snippets, [ent(0.9), con(0.9), neu()])
+
+    meta = cv["evidence_meta"]
+    assert len(meta) == len(cv["evidence_snippets"])
+    assert [m["domain"] for m in meta] == cv["sources"]
+    assert [m["stance"] for m in meta] == ["repeats", "debunks", "neutral"]
+    assert meta[0]["url"] == "https://viralnews.in/x"
+    assert meta[0]["published_at"] == "2026-10-28T09:00:00Z"
+    assert meta[0]["provider"] == "newsapi"
+
+
+def test_stance_ignores_trust():
+    """A low-trust site repeating the claim is still recorded as repeating it."""
+    cv = aggregate_claim("A claim.", [snip(trust=0.1, relevance=0.4)], [ent(0.9)])
+    assert cv["verdict"] == "neutral"
+    assert cv["evidence_meta"][0]["stance"] == "repeats"
+    assert cv["evidence_meta"][0]["trust"] == pytest.approx(0.1)
+
+
+def test_unverifiable_has_empty_evidence_meta():
+    cv = aggregate_claim("A claim.", [], [], status="no_hits")
+    assert cv["evidence_meta"] == []
+
+
 # ── Absence of evidence ───────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("status", ["no_hits", "no_relevant", "rate_limited", "error"])

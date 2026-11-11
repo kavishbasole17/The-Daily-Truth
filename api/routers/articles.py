@@ -117,6 +117,53 @@ class LocationOut(BaseModel):
     also:         list[dict] = []           # other places named in the same claim
 
 
+class EvidenceMetaOut(BaseModel):
+    url:          str = ""
+    domain:       str = ""
+    published_at: str = ""
+    provider:     str = ""
+    trust:        float = 0.5
+    stance:       str = "neutral"               # repeats | debunks | neutral
+    stance_score: float = 0.0
+
+
+class TimelineEntryOut(BaseModel):
+    date:   str = ""                            # YYYY-MM-DD, "" when the source gave none
+    domain: str = ""
+    url:    str = ""
+    kind:   str = ""                            # repeats | debunks | mentions | fact_check
+    label:  str = ""                            # the fact-check's rating, for kind=fact_check
+    trust:  float = 0.5
+    found_by: str = "evidence"                  # evidence | wider_search | fact_check
+
+
+class FactCheckOut(BaseModel):
+    claim_text:   str = ""
+    claimant:     str = ""
+    claim_date:   str = ""
+    publisher:    str = ""
+    site:         str = ""
+    url:          str = ""
+    rating:       str = ""
+    rating_class: str = "other"                 # false | misleading | true | other
+    review_date:  str = ""
+    relevance:    float = 0.0
+    trust:        float = 0.5
+
+
+class OriginOut(BaseModel):
+    basis:             str = "none"             # fact_check | earliest_indexed | none
+    claimant:          str | None = None
+    claim_date:        str | None = None
+    claimant_source:   str | None = None
+    earliest_seen:     TimelineEntryOut | None = None
+    first_debunk:      TimelineEntryOut | None = None
+    timeline:          list[TimelineEntryOut] = []
+    fact_checks:       list[FactCheckOut] = []
+    fact_check_status: str = "skipped"          # ok | disabled | rate_limited | error | skipped
+    search_status:     str = "skipped"          # wider search: ok | no_nli | no_similarity | no_models | disabled | error | rate_limited
+
+
 class ClaimVerdictOut(BaseModel):
     claim:             str
     verdict:           str
@@ -145,6 +192,12 @@ class ClaimVerdictOut(BaseModel):
     event_corroborated: bool = False           # recent independent outlets report the same event
     corroborating_sources: list[str] = []
     detail_mismatch: bool = False              # event confirmed, but the claim's figures differ
+
+    # Per-snippet provenance, parallel to evidence_snippets. Empty for verdict
+    # rows stored before this existed.
+    evidence_meta:     list[EvidenceMetaOut] = []
+    # Origin trail, only for claims the evidence did not support.
+    origin:            OriginOut | None = None
 
 
 class DegradationOut(BaseModel):
