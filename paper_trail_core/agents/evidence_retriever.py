@@ -1029,6 +1029,15 @@ def retrieve_for_claim(claim: str, idx: int, location: dict[str, Any] | None = N
     snippets = (gate_by_relevance(claim, deduped, claim_mode=True) if claim_mode
                 else gate_by_relevance(claim, deduped))
 
+    # Wikipedia is an encyclopedia, not a news source. For a claim about something
+    # that happened ("researchers found a weakness in password managers") a page
+    # that merely shares the topic ("Password manager", "Computer security") says
+    # nothing about the event, yet it used to be shown as the only "evidence".
+    # Keep Wikipedia there only when the page's title is a named thing in the claim.
+    if (not claim_mode) or is_time_bound(claim):
+        snippets = [s for s in snippets
+                    if s.get("provider") != "wikipedia" or _title_anchored(s, claim)]
+
     if snippets:
         status = "ok"
     elif "rate_limited" in statuses and not deduped:
