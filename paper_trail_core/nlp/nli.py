@@ -125,10 +125,19 @@ def get_nli():
         log.info("nli: loading %s on %s", _MODEL_NAME, device)
 
         tokenizer = AutoTokenizer.from_pretrained(_MODEL_NAME)
-        kwargs = {}
         if device == "cuda" and _FP16:
-            kwargs["dtype"] = torch.float16
-        model = AutoModelForSequenceClassification.from_pretrained(_MODEL_NAME, **kwargs)
+            # transformers renamed `torch_dtype` to `dtype` in 4.56. On older
+            # versions `dtype` is forwarded to the model constructor and raises
+            # TypeError, which made the NLI backend unavailable on every GPU
+            # machine and silently dropped every verdict to the lexical fallback.
+            try:
+                model = AutoModelForSequenceClassification.from_pretrained(
+                    _MODEL_NAME, dtype=torch.float16)
+            except TypeError:
+                model = AutoModelForSequenceClassification.from_pretrained(
+                    _MODEL_NAME, torch_dtype=torch.float16)
+        else:
+            model = AutoModelForSequenceClassification.from_pretrained(_MODEL_NAME)
         model.to(device)
         model.eval()
 

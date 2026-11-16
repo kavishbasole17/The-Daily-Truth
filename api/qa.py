@@ -220,14 +220,10 @@ def answer_question(question: str, checks: list[dict[str, Any]],
                     history: list[tuple[str, str]] | None = None) -> QAResult:
     ctx = build_context(checks)
     history = history or []
+    from paper_trail_core.nlp.llm import llm_configured
+
     provider = getattr(settings, "LLM_PROVIDER", "anthropic") if settings else "anthropic"
-    has_key = bool(settings and (
-        (provider == "anthropic" and settings.ANTHROPIC_API_KEY
-         and not settings.ANTHROPIC_API_KEY.startswith("sk-ant-...")) or
-        (provider == "openai" and settings.OPENAI_API_KEY
-         and not settings.OPENAI_API_KEY.startswith("sk-..."))
-    ))
-    if not getattr(settings, "QA_ENABLED", True) or not has_key:
+    if not getattr(settings, "QA_ENABLED", True) or not llm_configured():
         return extractive_answer(question, ctx, "Follow-up answers need an AI model, which isn't set up on this server.")
 
     try:

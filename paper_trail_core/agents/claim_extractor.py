@@ -20,6 +20,7 @@ more here than a better default that silently degrades.
 """
 from __future__ import annotations
 
+import itertools
 import logging
 import os
 import re
@@ -156,9 +157,14 @@ def _reject_hallucinations(text: str, claims: list[str], min_cosine: float = 0.5
     sentences = segment_sentences(text)
     if not sentences or not claims:
         return claims
+    # The prompt asks the model to resolve "he" / "the ministry" / "last week"
+    # from the surrounding text, so a faithful claim often draws on two
+    # adjacent sentences and matches neither one alone. Comparing against
+    # sentence pairs as well keeps those claims without lowering the bar.
+    windows = sentences + [f"{a} {b}" for a, b in itertools.pairwise(sentences)]
     try:
         from paper_trail_core.nlp.embeddings import embed
-        vecs = embed(claims + sentences)
+        vecs = embed(claims + windows)
         c_vecs, s_vecs = vecs[: len(claims)], vecs[len(claims):]
         sims = c_vecs @ s_vecs.T
         return [c for i, c in enumerate(claims) if sims[i].max() >= min_cosine]

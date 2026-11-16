@@ -659,3 +659,48 @@
     .check-actions{ flex-direction:column; }
     .check-share-link a{ max-width:180px; }
 }
+
+/* ── Independent AI fact-check (blended into the final verdict) ─────────── */
+.llm-judge-head{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:10px;
+}
+
+.llm-judge-verdict{
+    font-size:.78rem;
+}
+
+.llm-judge-summary{
+    margin:0 0 12px;
+    line-height:1.55;
+}
+
+.llm-judge-chip{
+    font-size:.68rem;
+    padding:3px 9px;
+    margin-right:8px;
+    vertical-align:middle;
+}
+
+.llm-judge-claim{
+    font-weight:600;
+}
+
+.llm-judge .evidence-list li .evidence-link{
+    margin-left:8px;
+}
+
+.llm-judge-sources,
+.llm-judge-blend{
+    margin:10px 0 0;
+    font-size:.82rem;
+    line-height:1.5;
+}
+
+.llm-judge-sources a{
+    color:inherit;
+    text-decoration:underline;
+}

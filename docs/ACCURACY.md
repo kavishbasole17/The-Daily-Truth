@@ -14,12 +14,39 @@ Full accuracy needs all of:
 
 | Requirement | Why |
 |---|---|
-| `ANTHROPIC_API_KEY` in `.env` | LLM claim extraction (`CLAIM_BACKEND=llm`), translation of non-English articles, chat replies with new checks |
+| `ANTHROPIC_API_KEY` in `.env` | The independent LLM fact-check that is blended into every verdict (`LLM_JUDGE=true`), LLM claim extraction (`CLAIM_BACKEND=llm`), translation of non-English articles, chat replies with new checks |
 | `torch`, `transformers`, `sentence-transformers` | NLI model (the core judgement) and evidence relevance gating |
-| `tensorflow` | lstm / gru / cnn / cnn_lstm are inputs to the stacking ensemble |
+| `tensorflow` | lstm / gru / cnn / cnn_lstm are inputs to the stacking ensemble. The `.keras` files were saved with Keras 3.14; older Keras (3.11 with TF 2.20) is handled by `api/model_loader.py`, which strips the newer config keys on load |
 | `scikit-learn==1.7.2` (pinned) | the version `models/` was saved with; newer versions fail to load `gradient_boosting` and warn of invalid results |
 | Tesseract binary + Hindi pack | image (screenshot) checks; without it they abstain |
 | `NEWS_API_KEY` (+ optionally `TAVILY_API_KEY` / `SERPAPI_KEY`) | live news evidence; a web-search key widens coverage beyond news + Wikipedia |
+
+## How the final verdict is reached
+
+Two independent checks run **at the same time** on every submission:
+
+1. **The agentic pipeline**: claim extraction → evidence retrieval (news, Wikipedia, regional
+   RSS) → NLI → style ensemble → calibrated fusion. Produces P(real) and a verdict with an
+   abstention band.
+2. **The independent LLM check** (`paper_trail_core/agents/llm_judge.py`): Claude Opus 5.5 reads the
+   same text, searches the live web for each key claim (up to `LLM_JUDGE_MAX_SEARCHES`), and
+   returns its own calibrated P(real), a confidence, a summary and per-claim assessments with sources.
+   It sees nothing of the pipeline's evidence, which is what makes agreement between the two meaningful.
+
+They are blended by `paper_trail_core/agents/blend.py`:
+
+| Rule | What happens |
+|---|---|
+| Weights | LLM `LLM_JUDGE_WEIGHT` (0.6), pipeline the rest (0.4). The LLM is discounted ×0.5 if it found no web sources and by its own confidence; the pipeline is zeroed if NLI ran degraded and halved if no claim had evidence. P(final) is the normalised weighted mean. |
+| Agreement | Both commit to the same side → committed verdict. The most reliable case. |
+| **Disagreement** | Both commit, to opposite sides → **uncertain**, whatever the average says (0.6×0.9 + 0.4×0.2 = 0.62 would otherwise read "likely real"). Shown as `judges_disagree`. |
+| LLM alone | The pipeline abstained → the LLM's verdict stands only if its confidence ≥ `LLM_JUDGE_MIN_CONFIDENCE` and it found at least one source. |
+| LLM missing | No key, failure or timeout → the pipeline verdict stands and a `llm_judge_*` degradation says why. |
+
+Everything the blend used (`p_llm`, `p_agentic`, weights, rule) is stored with the verdict
+(`verdict.llm_judge.blend`), shown in the UI and printed in the reasoning trace. The
+evaluation harness records `llm_p_real` per article so the 0.6/0.4 split can later be
+*learned* from labelled data instead of asserted.
 
 ## Measured on the real pipeline (CPU, live evidence, no LLM key)
 

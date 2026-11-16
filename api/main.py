@@ -48,7 +48,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from api.database import create_tables, ensure_columns
-from api.model_loader import ModelRegistry, clean_text
+from api.model_loader import clean_text, get_shared_registry
 from api.schemas import (
     BenchmarkRow,
     ChartInfo,
@@ -86,7 +86,9 @@ logger = logging.getLogger(__name__)
 BASE_DIR    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESULTS_DIR = os.path.join(BASE_DIR, 'results')
 
-registry = ModelRegistry()
+# Shared with the verification pipeline's style-ensemble node, so the models
+# are loaded into memory once per process rather than once per consumer.
+registry = get_shared_registry(load=False)
 
 CHART_META = {
     'comparison_all_metrics': 'All-metrics comparison (Accuracy, F1, Precision, Recall)',
@@ -110,7 +112,7 @@ async def lifespan(app: FastAPI):
     # Load ML models from disk
     logger.info('Loading models from disk...')
     try:
-        registry.load_all()
+        get_shared_registry(load=True)
         logger.info(
             f'Ready: {registry.classical_count} classical + '
             f'{registry.dl_count} DL models loaded.'

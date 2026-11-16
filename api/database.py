@@ -63,7 +63,7 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "article_ids": "TEXT",
         "error_message": "TEXT",
     },
-    "verdicts": {"degradations": "TEXT", "fused_score": "FLOAT"},
+    "verdicts": {"degradations": "TEXT", "fused_score": "FLOAT", "llm_judge": "TEXT"},
 }
 
 

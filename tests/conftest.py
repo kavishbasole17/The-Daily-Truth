@@ -75,6 +75,18 @@ def _article_path_by_default(monkeypatch):
     monkeypatch.setattr(settings, "CLAIM_MODE", False)
 
 
+@pytest.fixture(autouse=True)
+def _no_llm_judge(monkeypatch):
+    """
+    The independent LLM fact-check needs an API key and the network. It is off
+    for the suite and switched on explicitly by tests/test_llm_judge.py, which
+    stubs the call.
+    """
+    from config import settings
+
+    monkeypatch.setattr(settings, "LLM_JUDGE", False, raising=False)
+
+
 @pytest.fixture
 def offline_settings(monkeypatch):
     """Force every stage onto a backend that needs no network and no model."""

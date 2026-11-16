@@ -66,7 +66,9 @@ except ImportError:  # pragma: no cover
     _STAGE_TIMEOUT = 45.0
     _LLM_STAGE_TIMEOUT = 300.0
 
+from paper_trail_core.agents import fusion
 from paper_trail_core.agents.adjudicator import adjudicate_node
+from paper_trail_core.agents.blend import blend_verdicts
 from paper_trail_core.agents.claim_extractor import extract_claims_node
 from paper_trail_core.agents.evidence_retriever import retrieve_evidence_node
 from paper_trail_core.agents.locator import locate_node
@@ -76,7 +78,7 @@ from paper_trail_core.agents.state import ClaimVerdict, PipelineState
 from paper_trail_core.agents.stylistic_ensemble_agent import run_ensemble_node
 from paper_trail_core.agents.translation_agent import translate_node
 from paper_trail_core.agents.verifier import verify_claims_node
-from paper_trail_core.degradations import Degradation, degrade, summarise
+from paper_trail_core.degradations import Degradation, degrade, format_degradations, summarise
 
 log = logging.getLogger(__name__)
 
@@ -331,6 +333,10 @@ class VerdictResult:
     # the only place the OCR (and, if applicable, translated) transcription
     # comes back to the caller. Empty when OCR/translation abstained.
     article_text: str = ""
+    # The independent LLM fact-check and how it was blended with the agentic
+    # verdict (paper_trail_core/agents/llm_judge.py, blend.py). None when the
+    # judge is off or did not run; the degradations say why.
+    llm_judge: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -345,6 +351,7 @@ class VerdictResult:
             "degradations":       list(self.degradations),
             "retrieval_stats":    self.retrieval_stats,
             "article_text":       self.article_text,
+            "llm_judge":          self.llm_judge,
         }
 
     def claim_verdicts_json(self) -> str:
@@ -352,6 +359,149 @@ class VerdictResult:
 
     def degradations_json(self) -> str:
         return json.dumps(list(self.degradations))
+
+
+# ── Independent LLM check, run concurrently with the graph ─────────────────────
+
+_TRACE_DEGRADATIONS_MARKER = "\nDegradations (the system did not run at full capability):"
+
+
+@dataclass
+class _JudgeHandle:
+    future: object
+    pool: ThreadPoolExecutor
+    started: float
+
+
+def _judge_enabled() -> bool:
+    return bool(getattr(settings, "LLM_JUDGE", False))
+
+
+def _start_judge(text: str) -> _JudgeHandle | None:
+    """Kick off the LLM fact-check in the background; None if the judge is off."""
+    if not _judge_enabled() or not (text or "").strip():
+        return None
+    import time
+
+    from paper_trail_core.agents.llm_judge import judge_text
+    pool = ThreadPoolExecutor(max_workers=1)
+    return _JudgeHandle(future=pool.submit(judge_text, text), pool=pool, started=time.time())
+
+
+def _judge_trace(judge: dict, blend: dict) -> str:
+    j = judge
+    lines = [
+        "",
+        "",
+        f"INDEPENDENT LLM CHECK ({j.get('model') or 'LLM'}"
+        + (f", {j.get('n_searches', 0)} web searches, {len(j.get('sources') or [])} sources"
+           if j.get("used_web_search") else ", no web search")
+        + f", {j.get('elapsed_s', 0):.0f}s)",
+        (f"  Verdict / P(real) / confidence : {j.get('verdict')} / {j.get('p_real', 0.5):.3f} / "
+         f"{j.get('confidence', 0.0):.2f}"),
+    ]
+    if j.get("summary"):
+        lines.append(f"  {j['summary']}")
+    for c in j.get("claims") or []:
+        lines.append(f"  [{c.get('assessment', 'unclear').upper()[:6].ljust(6)}] {c.get('claim', '')[:96]}")
+        if c.get("evidence"):
+            lines.append(f"          {c['evidence'][:160]}")
+    lines += [
+        "",
+        "FINAL BLEND",
+        (f"  {blend['w_llm']:.2f} x LLM {blend['p_llm']:.3f} + {blend['w_agentic']:.2f} x pipeline "
+         f"{blend['p_agentic']:.3f} = {blend['p_final']:.3f}  ->  {blend['verdict']}  (rule: {blend['rule']})"),
+    ]
+    if blend.get("note"):
+        lines.append(f"  {blend['note']}")
+    return "\n".join(lines)
+
+
+def _apply_judge(vr: VerdictResult, handle: _JudgeHandle | None, text: str) -> VerdictResult:
+    """
+    Wait for the LLM check (within its budget) and blend it into `vr`.
+
+    Never raises: a missing key, a failure or a timeout becomes a degradation
+    and the agentic verdict stands on its own.
+    """
+    if not _judge_enabled():
+        return vr
+    import time
+
+    from paper_trail_core.nlp.llm import llm_configured
+
+    new_degradations: list[Degradation] = []
+    judge: dict | None = None
+
+    if not llm_configured():
+        new_degradations += degrade(
+            "llm_judge", "llm_judge_not_configured",
+            "The independent LLM fact-check did not run because no ANTHROPIC_API_KEY is "
+            "set; the verdict comes from the evidence pipeline alone.",
+        )
+    elif handle is None:
+        new_degradations += degrade(
+            "llm_judge", "llm_judge_skipped",
+            "The independent LLM fact-check was skipped: no text reached it.",
+        )
+    else:
+        budget = float(getattr(settings, "LLM_JUDGE_TIMEOUT_S", 240.0))
+        remaining = max(0.0, budget - (time.time() - handle.started))
+        try:
+            judge = handle.future.result(timeout=remaining).to_dict()
+        except FutureTimeout:
+            log.error("pipeline: LLM judge timed out after %.0fs", budget)
+            new_degradations += degrade(
+                "llm_judge", "llm_judge_timeout",
+                f"The independent LLM fact-check did not finish within {budget:.0f}s; "
+                "the verdict comes from the evidence pipeline alone.",
+            )
+        except Exception as exc:
+            log.exception("pipeline: LLM judge failed")
+            new_degradations += degrade(
+                "llm_judge", "llm_judge_failed",
+                f"The independent LLM fact-check failed ({type(exc).__name__}); "
+                "the verdict comes from the evidence pipeline alone.",
+            )
+        finally:
+            handle.pool.shutdown(wait=False, cancel_futures=True)
+
+    if judge is None:
+        vr.degradations = list(vr.degradations) + new_degradations
+        base = vr.reasoning_trace.split(_TRACE_DEGRADATIONS_MARKER, 1)[0]
+        vr.reasoning_trace = base + format_degradations(vr.degradations)
+        return vr
+
+    low, high = fusion.thresholds()
+    feats = vr.fusion_features or {}
+    blend = blend_verdicts(
+        vr.fused_score, vr.verdict, judge,
+        weight_llm=float(getattr(settings, "LLM_JUDGE_WEIGHT", 0.6)),
+        low=low, high=high,
+        nli_degraded=bool(feats.get("nli_degraded", 0.0)),
+        coverage=float(feats.get("coverage", 1.0)) if vr.claim_verdicts else 0.0,
+        min_llm_confidence=float(getattr(settings, "LLM_JUDGE_MIN_CONFIDENCE", 0.6)),
+    )
+    if blend["rule"] == "disagreement":
+        new_degradations += degrade(
+            "llm_judge", "judges_disagree",
+            f"The evidence pipeline said {vr.verdict} but the independent LLM check said "
+            f"{judge.get('verdict')}; the final verdict is uncertain until the two agree.",
+        )
+    elif blend["rule"] in ("llm_low_confidence", "llm_ungrounded"):
+        new_degradations += degrade("llm_judge", blend["rule"], blend["note"].capitalize() + ".",
+                                    severity="info")
+
+    vr.verdict = blend["verdict"]
+    vr.confidence = float(blend["confidence"] if blend["confidence"] is not None else vr.confidence)
+    vr.fused_score = float(blend["p_final"])
+    vr.fusion_method = f"{vr.fusion_method}+llm_judge"
+    vr.llm_judge = {**judge, "blend": blend}
+    vr.degradations = list(vr.degradations) + new_degradations
+    base = vr.reasoning_trace.split(_TRACE_DEGRADATIONS_MARKER, 1)[0]
+    vr.reasoning_trace = base + _judge_trace(judge, blend) + format_degradations(vr.degradations)
+    log.info("pipeline: blended verdict=%s p=%.3f rule=%s", vr.verdict, vr.fused_score, blend["rule"])
+    return vr
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
@@ -465,8 +615,11 @@ def run_verification_pipeline(
         log.warning("pipeline: truncating %d chars to %d", len(text), MAX_ARTICLE_CHARS)
         text = text[:MAX_ARTICLE_CHARS]
 
+    # The independent LLM check starts now and runs while the graph runs; the
+    # two are joined and blended once the graph has its own verdict.
+    handle = _start_judge(text)
     initial_state: PipelineState = {**_base_state(url, region_hint), "article_text": text}
-    return _run_graph(initial_state)
+    return _apply_judge(_run_graph(initial_state), handle, text)
 
 
 def run_verification_pipeline_image(
@@ -498,4 +651,8 @@ def run_verification_pipeline_image(
         "input_type":     "image",
         "raw_image_ref":  image_path,
     }
-    return _run_graph(initial_state)
+    vr = _run_graph(initial_state)
+    # The text is only known after OCR (and translation), so for an image the
+    # LLM check runs after the graph rather than alongside it. An abstained
+    # OCR read leaves no text and the judge is skipped, with a degradation.
+    return _apply_judge(vr, _start_judge(vr.article_text), vr.article_text)

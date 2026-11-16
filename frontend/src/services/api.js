@@ -231,7 +231,9 @@ export const pollVerification = async (id, opts = {}) => {
 
         if (data.status === "completed") return data;
         if (data.status === "failed") {
-            throw new Error("Verification failed. Please try again.");
+            // The server stores a user-readable reason (e.g. a link that
+            // needs a login); show it instead of a generic message.
+            throw new Error(data.error || "Verification failed. Please try again.");
         }
         await new Promise(r => setTimeout(r, intervalMs));
     }

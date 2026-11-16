@@ -201,6 +201,18 @@ def accuracy_report(deep: bool = False) -> dict[str, Any]:
         f"LLM ({getattr(s, 'QA_MODEL', '')}) with verify_claim tool" if llm_ok else "rule-based",
         "", "Set ANTHROPIC_API_KEY."))
 
+    # 11. Independent LLM fact-check, blended into the final verdict
+    judge_on = bool(getattr(s, "LLM_JUDGE", False))
+    stages.append(_stage(
+        "llm_judge", judge_on and llm_ok,
+        (f"{getattr(s, 'LLM_JUDGE_MODEL', '')} with "
+         f"{'web search' if getattr(s, 'LLM_JUDGE_WEB_SEARCH', True) else 'no web search'}, "
+         f"weight {getattr(s, 'LLM_JUDGE_WEIGHT', 0.6):.2f}") if judge_on else "off",
+        ("Runs concurrently with the pipeline; the final verdict blends both and abstains when "
+         "they disagree." if judge_on and llm_ok else
+         "The final verdict comes from the evidence pipeline alone."),
+        "Set LLM_JUDGE=true and ANTHROPIC_API_KEY."))
+
     full = all(st["full_accuracy"] for st in stages)
     return {
         "full_accuracy": full,

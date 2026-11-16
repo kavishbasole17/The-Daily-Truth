@@ -76,7 +76,19 @@ def _unit_family(text: str, start: int, end: int) -> str | None:
     Classify the unit attached to a number by looking at a small window either
     side of it — units precede ("$5") or follow ("5 percent") the figure.
     """
-    window = text[max(0, start - 12):min(len(text), end + 22)].lower()
+    # A preceding unit sits right against the figure ("$5", "Rs. 5", "USD 5");
+    # a following one may trail by a few words ("5 lakh people", "5 per cent").
+    before = text[max(0, start - 5):start]
+    after = text[end:end + 22]
+    # Stop at the neighbouring figure, so in "5 percent in 2019" the year is
+    # not tagged as a percentage by the unit that belongs to the 5.
+    cut = re.search(r"\d", after)
+    if cut:
+        after = after[:cut.start()]
+    digits = [m.end() for m in re.finditer(r"\d", before)]
+    if digits:
+        before = before[digits[-1]:]
+    window = (before + after).lower()
     for family, pattern in _UNIT_PATTERNS:
         if family == "year":
             continue

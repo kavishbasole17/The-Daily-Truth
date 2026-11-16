@@ -39,6 +39,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from typing import Any
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -52,8 +53,16 @@ try:
     _MAX_CALLS = settings.MAX_EVIDENCE_CALLS
     _REL_MIN   = settings.RELEVANCE_MIN
     _WORKERS   = settings.RETRIEVAL_WORKERS
+    _STAGE_BUDGET_S = settings.STAGE_TIMEOUT_S
 except ImportError:  # pragma: no cover
-    _BACKEND, _PROVIDER, _MAX_CALLS, _REL_MIN, _WORKERS = "live", "newsapi", 12, 0.35, 6
+    _BACKEND, _PROVIDER, _MAX_CALLS, _REL_MIN, _WORKERS = "live", "newsapi", 12, 0.45, 3
+    _STAGE_BUDGET_S = 90.0
+
+# Head-room kept inside the stage budget so a slow claim is cut off here, with
+# every other claim's evidence intact, rather than by the stage guard, which
+# discards the whole node's output.
+_DEADLINE_MARGIN_S = 5.0
+_MIN_DEADLINE_S = 10.0
 
 from datetime import UTC
 
@@ -1095,8 +1104,36 @@ def retrieve_evidence_node(state: PipelineState) -> dict:
             kwargs["claim_mode"] = True
         return retrieve_for_claim(claim, idx, **kwargs)
 
-    with ThreadPoolExecutor(max_workers=max(1, _WORKERS)) as pool:
-        evidence = list(pool.map(_fetch, list(enumerate(budget))))
+    def _unfinished(idx: int, claim: str, status: str) -> dict[str, Any]:
+        item = {"claim": claim, "snippets": [], "status": status, "cache_hits": 0, "queries": 0}
+        if idx < len(locations) and locations[idx]:
+            item["location"] = locations[idx]
+        return item
+
+    # Each claim gets its own future and a shared deadline just inside the
+    # stage budget. Before, one hung provider took the whole stage past its
+    # timeout and the stage guard threw away the evidence of every claim that
+    # had finished; now only the slow claim is reported unverifiable. A claim
+    # whose retrieval raises is likewise recorded on its own instead of
+    # failing the node.
+    deadline = started + max(_MIN_DEADLINE_S, _STAGE_BUDGET_S - _DEADLINE_MARGIN_S)
+    pool = ThreadPoolExecutor(max_workers=max(1, _WORKERS))
+    evidence: list[dict[str, Any]] = []
+    n_timed_out = 0
+    try:
+        futures = [pool.submit(_fetch, p) for p in enumerate(budget)]
+        for (idx, claim), fut in zip(enumerate(budget), futures):
+            try:
+                evidence.append(fut.result(timeout=max(0.0, deadline - time.time())))
+            except FutureTimeout:
+                n_timed_out += 1
+                evidence.append(_unfinished(idx, claim, "timeout"))
+            except Exception:
+                log.exception("evidence_retriever: retrieval failed for claim %d", idx)
+                evidence.append(_unfinished(idx, claim, "error"))
+    finally:
+        # Never wait on a timed-out claim: its result is discarded.
+        pool.shutdown(wait=False, cancel_futures=True)
 
     for i, claim in enumerate(claims[_MAX_CALLS:], start=_MAX_CALLS):
         skipped = {"claim": claim, "snippets": [], "status": "skipped",
@@ -1121,6 +1158,7 @@ def retrieve_evidence_node(state: PipelineState) -> dict:
         "n_no_hits": sum(1 for e in evidence if e["status"] in ("no_hits", "no_relevant")),
         "n_rate_limited": n_rate_limited,
         "n_error": n_error,
+        "n_timeout": n_timed_out,
         "mean_relevance": round(sum(relevances) / len(relevances), 4) if relevances else 0.0,
         "mean_trust": round(sum(trusts) / len(trusts), 4) if trusts else 0.0,
         "cache_hit_rate": round(total_hits / max(1, total_queries), 4),
@@ -1153,6 +1191,13 @@ def retrieve_evidence_node(state: PipelineState) -> dict:
         degradations += degrade(
             "evidence_retriever", "search_error",
             f"Search failed for {n_error} claim(s) after retrying.",
+        )
+    if n_timed_out:
+        degradations += degrade(
+            "evidence_retriever", "retrieval_timeout",
+            f"Evidence search for {n_timed_out} claim(s) did not finish within the "
+            f"{_STAGE_BUDGET_S:.0f}s stage budget; they are reported as unverifiable. "
+            "This lowers confidence in the verdict; it is not evidence against the article.",
         )
     widened = [e for e in evidence if e.get("region", {}).get("widened")]
     if widened:

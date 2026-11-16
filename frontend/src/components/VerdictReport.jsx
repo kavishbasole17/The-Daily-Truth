@@ -202,6 +202,85 @@ function OriginTrail({ origin }) {
     );
 }
 
+const JUDGE_ASSESSMENT = {
+    supported: { label: "SUPPORTED", className: "badge-real" },
+    contradicted: { label: "CONTRADICTED", className: "badge-fake" },
+    unclear: { label: "UNCLEAR", className: "badge-neutral" },
+};
+
+const BLEND_RULE_COPY = {
+    agreement: "Both checks reached the same verdict independently.",
+    disagreement: "The two checks disagree, so the final verdict is uncertain until they agree.",
+    weighted: "Final verdict from the weighted blend of both checks.",
+    llm_led: "The evidence pipeline could not decide; the AI check carried the verdict.",
+    llm_low_confidence: "Only the AI check committed, but its own confidence was too low to rely on.",
+    llm_ungrounded: "Only the AI check committed, but it found no web sources to ground it.",
+    no_usable_signal: "Neither check produced a usable signal.",
+};
+
+/** The independent LLM fact-check and how it was blended into the final verdict. */
+function LLMJudgeSection({ judge }) {
+    const meta = VERDICT_META[judge.verdict] || VERDICT_META.uncertain;
+    const blend = judge.blend;
+    return (
+        <div className="chat-section llm-judge">
+            <div className="chat-section-title">
+                <CheckIcon />
+                Independent AI fact-check
+                <span className="muted">
+                    {" "}· {judge.used_web_search
+                        ? `${judge.n_searches} web search${judge.n_searches === 1 ? "" : "es"}`
+                        : "no web search"}
+                </span>
+            </div>
+            <div className="llm-judge-head">
+                <span className={`llm-judge-verdict ${meta.className}`}>{meta.label}</span>
+                <span className="muted">
+                    P(real) {Math.round((judge.p_real ?? 0.5) * 100)}% · confidence {Math.round((judge.confidence ?? 0) * 100)}%
+                </span>
+            </div>
+            {judge.summary && <p className="llm-judge-summary">{judge.summary}</p>}
+            {judge.claims?.length > 0 && (
+                <ul className="evidence-list">
+                    {judge.claims.map((c, i) => {
+                        const a = JUDGE_ASSESSMENT[c.assessment] || JUDGE_ASSESSMENT.unclear;
+                        return (
+                            <li key={i}>
+                                <span className={`${a.className} llm-judge-chip`}>{a.label}</span>
+                                <span className="llm-judge-claim">&ldquo;{c.claim}&rdquo;</span>
+                                {c.evidence && <span className="muted"> {c.evidence}</span>}
+                                {c.urls?.map(u => safeHref(u) && (
+                                    <a key={u} className="evidence-source evidence-link" href={u}
+                                       target="_blank" rel="noopener noreferrer nofollow">
+                                        {(() => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; } })()}
+                                    </a>
+                                ))}
+                            </li>
+                        );
+                    })}
+                </ul>
+            )}
+            {judge.sources?.length > 0 && (
+                <p className="llm-judge-sources muted">
+                    Sources consulted:{" "}
+                    {judge.sources.slice(0, 8).map((s, i) => safeHref(s.url) && (
+                        <a key={s.url} href={s.url} target="_blank" rel="noopener noreferrer nofollow">
+                            {i > 0 ? ", " : ""}{s.title || s.url}
+                        </a>
+                    ))}
+                </p>
+            )}
+            {blend && (
+                <p className="llm-judge-blend muted">
+                    Final score: {Math.round(blend.w_llm * 100)}% AI check × {blend.p_llm?.toFixed(2)} +{" "}
+                    {Math.round(blend.w_agentic * 100)}% evidence pipeline × {blend.p_agentic?.toFixed(2)} ={" "}
+                    {blend.p_final?.toFixed(2)}. {BLEND_RULE_COPY[blend.rule] || ""}
+                </p>
+            )}
+        </div>
+    );
+}
+
 /** The checked text with every located claim underlined in its verdict colour. */
 export function HighlightedText({ text, claimVerdicts, anchorPrefix, className = "" }) {
     const segments = highlightSegments(text, (claimVerdicts || []).map(cv => cv.claim));
@@ -297,6 +376,8 @@ export default function VerdictReport({ result, anchorPrefix, showText = false, 
                 </div>
                 {onDiscuss && <DiscussButton label="Discuss verdict" onClick={() => onDiscuss(null)} />}
             </div>
+
+            {verdict.llm_judge && <LLMJudgeSection judge={verdict.llm_judge} />}
 
             {verdict.degradations?.length > 0 && (
                 <div className="chat-section">

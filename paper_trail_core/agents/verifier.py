@@ -41,7 +41,7 @@ try:
     _MAX_PAIRS = settings.NLI_MAX_PAIRS
     _REL_MIN  = settings.RELEVANCE_MIN
 except ImportError:  # pragma: no cover
-    _BACKEND, _MAX_PAIRS, _REL_MIN = "transformer", 200, 0.35
+    _BACKEND, _MAX_PAIRS, _REL_MIN = "transformer", 200, 0.45
 
 from paper_trail_core.agents.state import ClaimVerdict, PipelineState
 from paper_trail_core.degradations import degrade

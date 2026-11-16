@@ -216,6 +216,9 @@ class Verdict(Base):
     degradations: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Calibrated P(real) before thresholding, kept for calibration analysis.
     fused_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # JSON: the independent LLM fact-check and how it was blended in
+    # (paper_trail_core/agents/llm_judge.py). NULL when it did not run.
+    llm_judge: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_model_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, server_default=func.now()

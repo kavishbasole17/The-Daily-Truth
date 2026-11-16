@@ -53,8 +53,26 @@ def _parse_json(raw: str) -> dict[str, Any]:
     return json.loads(m.group(0))
 
 
-def complete_json(prompt: str, *, max_tokens: int = 16000) -> dict[str, Any]:
-    """Send one user prompt; return the JSON object in the reply."""
+def _stream_anthropic(client, kwargs: dict[str, Any]):
+    """One streamed request; drops the newer parameters on an SDK that predates them."""
+    try:
+        with client.beta.messages.stream(
+                betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kwargs) as stream:
+            return stream.get_final_message()
+    except TypeError:  # older SDK without `fallbacks` / `output_config`
+        legacy = {k: v for k, v in kwargs.items() if k != "output_config"}
+        with client.messages.stream(**legacy) as stream:
+            return stream.get_final_message()
+
+
+def complete_json(prompt: str, *, max_tokens: int = 16000, effort: str = "high") -> dict[str, Any]:
+    """
+    Send one user prompt; return the JSON object in the reply.
+
+    `effort` sets the model's reasoning depth. Current models default to
+    `medium`; claim extraction and translation are accuracy-critical, so the
+    pipeline asks for `high` unless a caller says otherwise.
+    """
     provider = getattr(settings, "LLM_PROVIDER", "anthropic")
     model = getattr(settings, "LLM_MODEL", "claude-opus-5-5")
 
@@ -62,17 +80,13 @@ def complete_json(prompt: str, *, max_tokens: int = 16000) -> dict[str, Any]:
         import anthropic
 
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        kwargs = {"model": model, "max_tokens": max_tokens,
-                      "messages": [{"role": "user", "content": prompt}]}
+        kwargs: dict[str, Any] = {"model": model, "max_tokens": max_tokens,
+                                  "messages": [{"role": "user", "content": prompt}]}
+        if effort:
+            kwargs["output_config"] = {"effort": effort}
         # Streamed: long translations need a large max_tokens, which the SDK
         # rejects for non-streaming requests (HTTP timeout risk).
-        try:
-            with client.beta.messages.stream(
-                    betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kwargs) as stream:
-                msg = stream.get_final_message()
-        except TypeError:  # older SDK without `fallbacks`
-            with client.messages.stream(**kwargs) as stream:
-                msg = stream.get_final_message()
+        msg = _stream_anthropic(client, kwargs)
 
         if msg.stop_reason == "refusal":
             raise LLMError(f"model declined ({getattr(msg, 'stop_details', None)})")

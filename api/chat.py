@@ -177,8 +177,8 @@ def _llm_available() -> bool:
         return False
     if getattr(settings, "LLM_PROVIDER", "anthropic") != "anthropic":
         return False
-    key = settings.ANTHROPIC_API_KEY or ""
-    return bool(key) and not key.startswith("sk-ant-...")
+    from paper_trail_core.nlp.llm import llm_configured
+    return llm_configured()
 
 
 def _history_messages(history: list[dict[str, Any]]) -> list[dict[str, Any]]:

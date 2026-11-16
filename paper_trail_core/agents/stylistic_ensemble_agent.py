@@ -38,11 +38,12 @@ def _get_registry():
     if _registry is not None:
         return _registry
     try:
-        from api.model_loader import ModelRegistry
-        r = ModelRegistry()
-        r.load_all()
+        # The process-wide instance: when the API already loaded the models at
+        # startup this returns them without a second load.
+        from api.model_loader import get_shared_registry
+        r = get_shared_registry(load=True)
         _registry = r
-        log.info("ensemble_agent: ModelRegistry loaded (%d models)", r.total_loaded)
+        log.info("ensemble_agent: ModelRegistry ready (%d models)", r.total_loaded)
     except Exception as exc:
         log.warning("ensemble_agent: could not load ModelRegistry: %s", exc)
         _registry = None

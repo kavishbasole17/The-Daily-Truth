@@ -38,7 +38,7 @@ from paper_trail_core.agents.pipeline import run_verification_pipeline, run_veri
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/articles", tags=["Articles"])
 
-AI_MODEL_VERSION = "pipeline-v2-evidence-fusion"
+AI_MODEL_VERSION = "pipeline-v3-evidence-fusion-llm-judge"
 
 try:
     from config import settings
@@ -207,6 +207,34 @@ class DegradationOut(BaseModel):
     severity: str
 
 
+class LLMJudgeClaimOut(BaseModel):
+    claim:      str = ""
+    assessment: str = "unclear"              # supported | contradicted | unclear
+    evidence:   str = ""
+    urls:       list[str] = []
+
+
+class LLMJudgeSourceOut(BaseModel):
+    url:   str = ""
+    title: str = ""
+
+
+class LLMJudgeOut(BaseModel):
+    """The independent LLM fact-check and how it was blended into the verdict."""
+    verdict:         str = "uncertain"
+    p_real:          float = 0.5
+    confidence:      float = 0.0
+    summary:         str = ""
+    claims:          list[LLMJudgeClaimOut] = []
+    sources:         list[LLMJudgeSourceOut] = []
+    model:           str = ""
+    used_web_search: bool = False
+    n_searches:      int = 0
+    elapsed_s:       float = 0.0
+    # {p_agentic, p_llm, w_agentic, w_llm, p_final, verdict, rule, note, agentic_verdict}
+    blend:           dict | None = None
+
+
 class VerdictOut(BaseModel):
     id:                 int
     article_id:         int
@@ -219,6 +247,7 @@ class VerdictOut(BaseModel):
     created_at:         str
     fused_score:        float | None = None
     degradations:       list[DegradationOut] = []
+    llm_judge:          LLMJudgeOut | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -283,6 +312,7 @@ def _build_article_out(article: Article) -> ArticleOut:
         v = article.verdicts[-1]
         cvs_raw = json.loads(v.claim_verdicts) if v.claim_verdicts else []
         degradations_raw = json.loads(v.degradations) if getattr(v, "degradations", None) else []
+        judge_raw = json.loads(v.llm_judge) if getattr(v, "llm_judge", None) else None
         verdict_out = VerdictOut(
             id=v.id,
             article_id=v.article_id,
@@ -295,6 +325,7 @@ def _build_article_out(article: Article) -> ArticleOut:
             created_at=v.created_at.isoformat(),
             fused_score=getattr(v, "fused_score", None),
             degradations=[DegradationOut(**d) for d in degradations_raw],
+            llm_judge=LLMJudgeOut(**judge_raw) if isinstance(judge_raw, dict) else None,
         )
     return ArticleOut(
         id=article.id,
@@ -412,7 +443,9 @@ def _run_pipeline_job(article_id: int, text: str, url: str | None,
         article.stage = "verifying"
         db.commit()
 
-        vr = run_verification_pipeline(text, url, region)
+        # article.url is the final URL after redirects for a link check; the
+        # locator reads its domain for country context.
+        vr = run_verification_pipeline(text, article.url or url, region)
 
         verdict = Verdict(
             article_id=article_id,
@@ -423,6 +456,7 @@ def _run_pipeline_job(article_id: int, text: str, url: str | None,
             reasoning_trace=vr.reasoning_trace,
             degradations=vr.degradations_json(),
             fused_score=vr.fused_score,
+            llm_judge=json.dumps(vr.llm_judge) if vr.llm_judge else None,
             ai_model_version=AI_MODEL_VERSION,
         )
         db.add(verdict)
@@ -488,6 +522,7 @@ def _run_pipeline_image_job(article_id: int, image_path: str, url: str | None,
             reasoning_trace=vr.reasoning_trace,
             degradations=vr.degradations_json(),
             fused_score=vr.fused_score,
+            llm_judge=json.dumps(vr.llm_judge) if vr.llm_judge else None,
             ai_model_version=AI_MODEL_VERSION,
         )
         db.add(verdict)

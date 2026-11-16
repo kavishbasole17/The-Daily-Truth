@@ -109,6 +109,27 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "claude-opus-5-5"     # claim extraction + translation
 
     # ------------------------------------------------------------------
+    # Independent LLM fact-check, blended with the agentic verdict
+    # ------------------------------------------------------------------
+    # A second, independent judgement runs *concurrently* with the agentic
+    # pipeline: Claude reads the text, searches the live web for each key
+    # claim, and returns its own calibrated P(real). The final verdict is a
+    # weighted blend of the two, with a guard: when the two checks commit to
+    # opposite verdicts the result is "uncertain" rather than an average that
+    # looks confident. See paper_trail_core/agents/blend.py for the rules.
+    # Needs ANTHROPIC_API_KEY; without it the pipeline verdict stands alone and
+    # says so in a degradation.
+    LLM_JUDGE: bool = True
+    LLM_JUDGE_WEIGHT: float = 0.6             # share of the final score from the LLM check
+    LLM_JUDGE_MODEL: str = "claude-opus-5-5"
+    LLM_JUDGE_WEB_SEARCH: bool = True         # ground the check in live web search (recommended)
+    LLM_JUDGE_MAX_SEARCHES: int = 8           # web searches per check (cost / latency cap)
+    LLM_JUDGE_TIMEOUT_S: float = 240.0        # give up on the LLM check after this (pipeline verdict stands)
+    # A verdict the LLM check reaches *alone* (the pipeline abstained) is only
+    # committed when the LLM's self-reported confidence clears this bar.
+    LLM_JUDGE_MIN_CONFIDENCE: float = 0.6
+
+    # ------------------------------------------------------------------
     # Search APIs
     # ------------------------------------------------------------------
     NEWS_API_KEY: str | None = None        # newsapi.org — trusted-outlet headline search

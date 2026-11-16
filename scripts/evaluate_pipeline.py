@@ -123,6 +123,8 @@ def _cache_key(text: str) -> str:
         "evidence": settings.EVIDENCE_BACKEND, "ensemble": settings.ENSEMBLE_BACKEND,
         "nli_model": settings.NLI_MODEL, "rel_min": settings.RELEVANCE_MIN,
         "max_claims": settings.MAX_CLAIMS, "checkworthy": settings.CHECKWORTHY_MIN,
+        "llm_judge": settings.LLM_JUDGE, "judge_weight": settings.LLM_JUDGE_WEIGHT,
+        "judge_model": settings.LLM_JUDGE_MODEL, "judge_web": settings.LLM_JUDGE_WEB_SEARCH,
     }, sort_keys=True)
     return hashlib.sha256((cfg + "||" + text).encode("utf-8")).hexdigest()
 
@@ -154,6 +156,11 @@ def run_one(row: dict[str, Any], use_cache: bool = True) -> dict[str, Any]:
         "degradation_kinds": sorted({d["kind"] for d in vr.degradations}),
         "claim_labels": [cv.get("verdict") for cv in vr.claim_verdicts],
         "wall_s": round(time.time() - started, 3),
+        # The independent LLM check, kept per article so its weight can later be
+        # *learned* (scripts/train_fusion.py) instead of asserted.
+        "llm_p_real": (vr.llm_judge or {}).get("p_real"),
+        "llm_confidence": (vr.llm_judge or {}).get("confidence"),
+        "blend_rule": ((vr.llm_judge or {}).get("blend") or {}).get("rule", "agentic_only"),
         **{f"f_{k}": feats.get(k, 0.0) for k in FEATURE_NAMES},
     }
 
@@ -379,7 +386,7 @@ def render_markdown(report: dict[str, Any]) -> str:
 def write_feature_csv(records: list[dict], path: str) -> None:
     """Per-article feature rows — this file is the fusion training set."""
     cols = ["id", "source", "label", "fused_score", "ensemble_score", "verdict",
-            "confidence"] + [f"f_{k}" for k in FEATURE_NAMES]
+            "confidence", "llm_p_real", "llm_confidence", "blend_rule"] + [f"f_{k}" for k in FEATURE_NAMES]
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
         w.writeheader()

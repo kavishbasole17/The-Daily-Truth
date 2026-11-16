@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import threading
 from typing import Any
 
 import joblib
@@ -116,6 +117,59 @@ class ModelRegistry:
             except Exception as e:
                 logger.error(f'Failed to load {name}: {e}')
 
+    # Layer-config keys written by newer Keras releases that older ones reject.
+    _KERAS_FORWARD_KEYS = ('quantization_config',)
+
+    @classmethod
+    def _strip_forward_keys(cls, node: Any) -> Any:
+        """Recursively drop config keys this Keras does not know (value must be null)."""
+        if isinstance(node, dict):
+            return {k: cls._strip_forward_keys(v) for k, v in node.items()
+                    if not (k in cls._KERAS_FORWARD_KEYS and v is None)}
+        if isinstance(node, list):
+            return [cls._strip_forward_keys(v) for v in node]
+        return node
+
+    def _load_keras_model(self, tf, model_path: str):
+        """
+        Load a .keras file, tolerating a newer Keras's config keys.
+
+        models/deep_learning/*.keras were saved with Keras 3.14, whose layer
+        configs carry `quantization_config: null`. Keras 3.11 (bundled with
+        TensorFlow 2.20) rejects that key with "Unrecognized keyword
+        arguments", so all four DL base models failed to load and the stacking
+        ensemble silently ran with 0.5 in their place. `custom_objects` cannot
+        help: Keras resolves built-in layers by module name before consulting
+        it. So on that failure the archive's config.json is rewritten without
+        the offending keys into a temporary copy and loaded from there. The
+        weights file is byte-identical, so predictions are unchanged.
+        """
+        try:
+            return tf.keras.models.load_model(model_path)
+        except Exception as first:
+            if 'Unrecognized keyword arguments' not in str(first):
+                raise
+        import shutil
+        import tempfile
+        import zipfile
+
+        logger.warning('DL model %s was saved by a newer Keras; retrying with its '
+                       'unknown config keys removed', os.path.basename(model_path))
+        tmp_dir = tempfile.mkdtemp(prefix='paper_trail_keras_')
+        tmp_path = os.path.join(tmp_dir, os.path.basename(model_path))
+        try:
+            with zipfile.ZipFile(model_path) as src, \
+                    zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_DEFLATED) as dst:
+                for item in src.infolist():
+                    data = src.read(item.filename)
+                    if item.filename == 'config.json':
+                        cleaned = self._strip_forward_keys(json.loads(data.decode('utf-8')))
+                        data = json.dumps(cleaned).encode('utf-8')
+                    dst.writestr(item, data)
+            return tf.keras.models.load_model(tmp_path, compile=False)
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
     def _load_dl(self) -> None:
         # Try importing TF (it's optional — API still works without it)
         try:
@@ -146,7 +200,7 @@ class ModelRegistry:
                 logger.warning(f'DL model file missing: {model_path}')
                 continue
             try:
-                self.dl_models[name] = tf.keras.models.load_model(model_path)
+                self.dl_models[name] = self._load_keras_model(tf, model_path)
                 logger.info(f'DL model loaded: {name}')
             except Exception as e:
                 logger.error(f'Failed to load DL model {name}: {e}')
@@ -412,3 +466,38 @@ class ModelRegistry:
     @property
     def total_loaded(self) -> int:
         return self.classical_count + self.dl_count + self.hybrid_count
+
+
+# ── Process-wide registry ─────────────────────────────────────────────────────
+#
+# The API (api/main.py) and the pipeline's style-ensemble node each used to
+# build their own ModelRegistry, so every model — 18 classical, 4 Keras, the
+# stacking meta-learner — sat in memory twice and loaded twice at startup.
+# One shared instance serves both.
+
+_shared: ModelRegistry | None = None
+_shared_lock = threading.Lock()
+_shared_load_error: Exception | None = None
+
+
+def get_shared_registry(load: bool = True) -> ModelRegistry:
+    """
+    The process-wide ModelRegistry.
+
+    With `load=True` the models are loaded on first use (once, under a lock);
+    a load failure is raised to the caller and remembered so later callers
+    fail fast instead of re-reading the disk.
+    """
+    global _shared, _shared_load_error
+    with _shared_lock:
+        if _shared is None:
+            _shared = ModelRegistry()
+        if load and _shared.total_loaded == 0:
+            if _shared_load_error is not None:
+                raise _shared_load_error
+            try:
+                _shared.load_all()
+            except Exception as exc:
+                _shared_load_error = exc
+                raise
+        return _shared
