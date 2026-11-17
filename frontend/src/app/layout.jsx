@@ -34,7 +34,10 @@ const THEME_INIT_SCRIPT = `
 
 export default function RootLayout({ children }) {
     return (
-        <html lang="en">
+        // The inline script below sets data-theme before React hydrates (so the
+        // page never flashes the wrong theme); tell React that one attribute
+        // is expected to differ from the server markup.
+        <html lang="en" suppressHydrationWarning>
         <head>
             <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         </head>

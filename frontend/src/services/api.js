@@ -155,11 +155,37 @@ export const sendChatMessage = (conversationId, message, focus = null) =>
 export const getChatMessage = (conversationId, messageId) =>
     api.get(`/conversations/${conversationId}/messages/${messageId}`);
 
-/** Poll a chat reply until it's done; `onUpdate` sees each intermediate state. */
-export const pollChatMessage = async (conversationId, messageId, { onUpdate, intervalMs = 1500, timeoutMs = 300000 } = {}) => {
+// A poll is one of hundreds of cheap reads against a job that keeps running on
+// the server. One dropped connection or slow response (the server is busy
+// running models) must not turn a healthy check into "failed", so a poll that
+// gets no HTTP answer is retried a few times before giving up. A real HTTP
+// error (404, 401, ...) is still thrown at once.
+const MAX_POLL_NETWORK_ERRORS = 4;
+
+const pollOnce = async (request, failures) => {
+    try {
+        const { data } = await request();
+        failures.count = 0;
+        return data;
+    } catch (err) {
+        if (err?.response || ++failures.count > MAX_POLL_NETWORK_ERRORS) throw err;
+        return null;
+    }
+};
+
+/**
+ * Poll a chat reply until it's done; `onUpdate` sees each intermediate state.
+ * 12 min: a reply may run up to two full checks, each with its own LLM fact-check.
+ */
+export const pollChatMessage = async (conversationId, messageId, { onUpdate, intervalMs = 1500, timeoutMs = 720000 } = {}) => {
     const deadline = Date.now() + timeoutMs;
+    const failures = { count: 0 };
     while (Date.now() < deadline) {
-        const { data } = await getChatMessage(conversationId, messageId);
+        const data = await pollOnce(() => getChatMessage(conversationId, messageId), failures);
+        if (!data) {
+            await new Promise(r => setTimeout(r, intervalMs));
+            continue;
+        }
         onUpdate?.(data);
         if (data.status === "done") return data;
         if (data.status === "failed") throw new Error(data.error || "Couldn't reply. Please try again.");
@@ -224,8 +250,13 @@ export const pollVerification = async (id, opts = {}) => {
 
     // Poll rather than hold a long request open, so a slow or wedged pipeline
     // shows progress instead of a dead-looking spinner that eventually times out.
+    const failures = { count: 0 };
     while (Date.now() < deadline) {
-        const { data } = await getArticle(id);
+        const data = await pollOnce(() => getArticle(id), failures);
+        if (!data) {
+            await new Promise(r => setTimeout(r, intervalMs));
+            continue;
+        }
 
         if (onStage) onStage(data.stage || data.status);
 

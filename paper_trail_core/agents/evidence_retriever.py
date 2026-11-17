@@ -117,6 +117,47 @@ def _newsapi_start_cooldown() -> None:
         _newsapi_blocked_until = time.time() + _NEWSAPI_COOLDOWN_S
 
 
+# A key the provider rejected (401/403) is a configuration fault, not a
+# transient error: every further call is a guaranteed failure that still costs
+# a round trip, and the verdict must say that source was not searched. The
+# provider is skipped for the rest of the process (fix the key, restart).
+_rejected_lock = threading.Lock()
+_rejected_keys: dict[str, str] = {}
+
+_KEY_ENV = {"newsapi": "NEWS_API_KEY", "tavily": "TAVILY_API_KEY", "serpapi": "SERPAPI_KEY",
+            "newsdata": "NEWSDATA_API_KEY"}
+_SECRET_IN_URL = re.compile(r"(?i)\b(api_?key|key|token)=[^&\s'\"]+")
+
+
+def redact(text: object) -> str:
+    """Strip API keys from text bound for a log (requests puts the full URL in its errors)."""
+    return _SECRET_IN_URL.sub(r"\1=<redacted>", str(text))
+
+
+def _is_key_rejection(exc: Exception) -> bool:
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status in (401, 403):
+        return True
+    text = f"{type(exc).__name__} {exc}".lower()
+    return "invalidapikey" in text or "unauthorized" in text or "invalid api key" in text
+
+
+def _note_rejected(provider: str) -> None:
+    with _rejected_lock:
+        first = provider not in _rejected_keys
+        _rejected_keys[provider] = _KEY_ENV.get(provider, provider)
+    if first:
+        log.error("evidence_retriever: %s rejected its API key (%s). That source is skipped "
+                  "until the key is fixed and the server restarted.",
+                  provider, _KEY_ENV.get(provider, "its key"))
+
+
+def rejected_providers() -> dict[str, str]:
+    """{provider: env var} for every provider whose key was rejected in this process."""
+    with _rejected_lock:
+        return dict(_rejected_keys)
+
+
 def is_claim_mode(text: str) -> bool:
     """Whether the input is a short claim (decided on evidence) rather than an article."""
     from paper_trail_core.nlp.claim_mode import is_claim_text
@@ -461,9 +502,12 @@ def _search_newsapi(query: str) -> list[dict[str, Any]]:
         "searchIn": "title,description",
         "sortBy": "relevancy",
         "pageSize": 5,
-        "apiKey": settings.NEWS_API_KEY,
     }
-    resp = requests.get("https://newsapi.org/v2/everything", params=params, timeout=HTTP_TIMEOUT)
+    # The key travels in a header, not the query string: requests puts the
+    # whole URL in its error messages, and a failed call used to write the key
+    # into the server log.
+    resp = requests.get("https://newsapi.org/v2/everything", params=params,
+                        headers={"X-Api-Key": settings.NEWS_API_KEY}, timeout=HTTP_TIMEOUT)
 
     if resp.status_code == 429:
         _newsapi_start_cooldown()
@@ -629,6 +673,8 @@ def _search_cached(provider: str, query: str) -> tuple[list[dict[str, Any]], str
     fn = _PROVIDER_MAP.get(provider)
     if fn is None:
         return [], "error", False
+    if provider in rejected_providers():
+        return [], "error", False
 
     last_exc: Exception | None = None
     for attempt in range(2):
@@ -645,11 +691,15 @@ def _search_cached(provider: str, query: str) -> tuple[list[dict[str, Any]], str
             last_exc = exc
         except Exception as exc:
             last_exc = exc
+        if _is_key_rejection(last_exc):
+            _note_rejected(provider)
+            return [], "error", False
         # One bounded retry, for transient network/5xx only.
         if attempt == 0:
             time.sleep(0.5)
 
-    log.warning("evidence_retriever: %s query failed (%s): %r", provider, last_exc, query[:60])
+    log.warning("evidence_retriever: %s query failed (%s): %r",
+                provider, redact(last_exc), query[:60])
     return [], "error", False
 
 
@@ -864,7 +914,7 @@ def _search_regional_cached(provider: str, query: str, country_code: str) -> tup
         if attempt == 0:
             time.sleep(0.5)
     log.warning("evidence_retriever: regional %s query failed (%s): %r",
-                provider, last_exc, query[:60])
+                provider, redact(last_exc), query[:60])
     return [], "error"
 
 
@@ -1195,6 +1245,15 @@ def retrieve_evidence_node(state: PipelineState) -> dict:
             "evidence_retriever", "rate_limited",
             detail + " This lowers confidence in the verdict; it is not evidence "
             "against the article.",
+        )
+    rejected = rejected_providers()
+    if rejected:
+        degradations += degrade(
+            "evidence_retriever", "provider_key_rejected",
+            "A search provider rejected its API key ("
+            + ", ".join(f"{name}: {env}" for name, env in sorted(rejected.items()))
+            + "), so that source was not searched. Evidence came from the remaining "
+            "sources only, which lowers coverage; it is not evidence against the article.",
         )
     if n_error:
         degradations += degrade(

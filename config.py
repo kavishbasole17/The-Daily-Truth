@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     # *inverted* label orders, which is why verifier code reads id2label from
     # the loaded config instead of assuming an index order.
     NLI_MODEL: str = "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli"
-    NLI_DEVICE: str = "auto"            # auto | cuda | cpu
+    NLI_DEVICE: str = "auto"            # auto (cuda, then Apple mps, then cpu) | cuda | mps | cpu
     NLI_FP16: bool = True
     NLI_MAX_PAIRS: int = 200            # per article, highest-relevance pairs kept
     NLI_BATCH_SIZE: int = 32
@@ -105,8 +105,19 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     ANTHROPIC_API_KEY: str | None = None
     OPENAI_API_KEY: str | None = None
-    LLM_PROVIDER: str = "anthropic"           # "anthropic" | "openai"
+    LLM_PROVIDER: str = "anthropic"           # "anthropic" | "openai" | "nvidia"
     LLM_MODEL: str = "claude-opus-5-5"     # claim extraction + translation
+
+    # NVIDIA API catalog (build.nvidia.com), OpenAI-compatible. Used when
+    # LLM_PROVIDER=nvidia, for claim extraction, translation, written chat
+    # answers and (see LLM_JUDGE_PROVIDER) the independent fact-check. Only the
+    # chat tool loop needs Anthropic; without it, chat decides when to run a
+    # new check with rules (api/chat.py) and the model writes the answers.
+    NVIDIA_API_KEY: str | None = None
+    NVIDIA_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
+    NVIDIA_LLM_MODEL: str = "nvidia/nemotron-3-ultra-550b-a55b"  # extraction + translation
+    NVIDIA_QA_MODEL: str = "deepseek-ai/deepseek-v4.1-flash"     # follow-up answers
+    NVIDIA_JUDGE_MODEL: str = "nvidia/nemotron-3-ultra-550b-a55b"  # independent LLM fact-check
 
     # ------------------------------------------------------------------
     # Independent LLM fact-check, blended with the agentic verdict
@@ -121,6 +132,10 @@ class Settings(BaseSettings):
     # says so in a degradation.
     LLM_JUDGE: bool = True
     LLM_JUDGE_WEIGHT: float = 0.6             # share of the final score from the LLM check
+    # Which provider runs the judge: "anthropic" | "nvidia", or "" to follow
+    # LLM_PROVIDER. With nvidia the model is NVIDIA_JUDGE_MODEL and LLM_JUDGE_MODEL
+    # (a Claude model id) is not used.
+    LLM_JUDGE_PROVIDER: str = ""
     LLM_JUDGE_MODEL: str = "claude-opus-5-5"
     LLM_JUDGE_WEB_SEARCH: bool = True         # ground the check in live web search (recommended)
     LLM_JUDGE_MAX_SEARCHES: int = 8           # web searches per check (cost / latency cap)
@@ -277,5 +292,22 @@ class Settings(BaseSettings):
             self.ENSEMBLE_BACKEND = "mock"
 
 
+    def drop_placeholder_keys(self) -> None:
+        """
+        Treat `.env.example` placeholders (`...`, `sk-...`, `tvly-...`) as unset.
+
+        Every caller tests keys for truthiness, so a placeholder used to pass as
+        a real key: each provider was then called, got a 401 on every query and
+        reported "lookup failed" instead of simply being off.
+        """
+        for name, field in type(self).model_fields.items():
+            if not name.endswith("_KEY") or field.default is not None:
+                continue                      # optional API keys only, never JWT_SECRET_KEY
+            value = getattr(self, name)
+            if isinstance(value, str) and (not value.strip() or value.strip().endswith("...")):
+                setattr(self, name, None)
+
+
 settings = Settings()
 settings.apply_legacy_mock_flags()
+settings.drop_placeholder_keys()

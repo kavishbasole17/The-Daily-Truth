@@ -39,14 +39,14 @@ def _has(module: str) -> bool:
 
 def accuracy_report(deep: bool = False) -> dict[str, Any]:
     s = settings
-    from paper_trail_core.nlp.llm import llm_configured
+    from paper_trail_core.nlp.llm import active_model, llm_configured
     llm_ok = llm_configured()
     stages: list[dict[str, Any]] = []
 
     # 1. Claim extraction
     if s.CLAIM_BACKEND == "llm" and llm_ok:
-        stages.append(_stage("claim_extraction", True, f"LLM ({s.LLM_MODEL})",
-                             "Claude extracts self-contained claims; grounded against the text."))
+        stages.append(_stage("claim_extraction", True, f"LLM ({active_model()})",
+                             "The LLM extracts self-contained claims; grounded against the text."))
     else:
         stages.append(_stage(
             "claim_extraction", False,
@@ -68,13 +68,25 @@ def accuracy_report(deep: bool = False) -> dict[str, Any]:
         "pip install langdetect; set ANTHROPIC_API_KEY." if not lang_ok else "Set ANTHROPIC_API_KEY."))
 
     # 3. Evidence retrieval
+    # A key can be set and still be wrong. The retriever records any provider
+    # that answered 401/403 since startup; "set" must not be reported as "working".
+    try:
+        from paper_trail_core.agents.evidence_retriever import rejected_providers
+        rejected = rejected_providers()
+    except Exception as exc:  # diagnostics only
+        log.debug("accuracy: rejected-provider status unavailable: %s", exc)
+        rejected = {}
+
+    def _named(label: str, key: str) -> str:
+        return f"{label} (KEY REJECTED)" if key in rejected else label
+
     providers = []
     if s.NEWS_API_KEY:
-        providers.append("NewsAPI")
+        providers.append(_named("NewsAPI", "newsapi"))
     if s.TAVILY_API_KEY:
-        providers.append("Tavily")
+        providers.append(_named("Tavily", "tavily"))
     if s.SERPAPI_KEY:
-        providers.append("SerpAPI")
+        providers.append(_named("SerpAPI", "serpapi"))
     providers.append("Wikipedia")
     if s.REGION_AWARE and s.REGIONAL_NEWS_PROVIDER != "none":
         providers.append(f"regional news ({s.REGIONAL_NEWS_PROVIDER})")
@@ -88,13 +100,19 @@ def accuracy_report(deep: bool = False) -> dict[str, Any]:
         log.debug("accuracy: newsapi status unavailable: %s", exc)
     live = s.EVIDENCE_BACKEND == "live"
     broad = bool(s.TAVILY_API_KEY or s.SERPAPI_KEY)
+    rejected_detail = (
+        " Rejected by the provider (wrong or expired key): " + ", ".join(sorted(rejected.values()))
+        + "; those sources are being skipped." if rejected else "")
     stages.append(_stage(
-        "evidence_retrieval", live and bool(s.NEWS_API_KEY) and not news_detail,
+        "evidence_retrieval", live and bool(s.NEWS_API_KEY) and not news_detail and not rejected,
         f"{s.EVIDENCE_BACKEND}: " + ", ".join(providers),
         ("Searches trusted news + reference sources." +
          ("" if broad else " No general web search key, so coverage is news + Wikipedia only.")
-         + news_detail),
+         + news_detail + rejected_detail +
+         ("" if rejected else " Keys are only proven by use: this stays green until a provider "
+                              "rejects one during a check.")),
         "Set EVIDENCE_BACKEND=live and NEWS_API_KEY." if not live or not s.NEWS_API_KEY
+        else f"Replace {', '.join(sorted(rejected.values()))} in .env and restart the server." if rejected
         else "Wait for the NewsAPI quota to reset, or add TAVILY_API_KEY."))
 
     # 4. NLI (the core judgement)
@@ -196,22 +214,49 @@ def accuracy_report(deep: bool = False) -> dict[str, Any]:
         "pip install pytesseract."))
 
     # 10. Chat replies
+    # Report what api/chat.py will really do: the tool loop is Anthropic-only,
+    # so "an LLM key is set" is not enough to claim it. (With LLM_PROVIDER=nvidia
+    # this stage used to say "LLM (<QA_MODEL>) with verify_claim tool" while
+    # every reply was in fact rule-routed.)
+    from api.chat import _llm_available as chat_tool_loop
+    chat_on = bool(getattr(s, "QA_ENABLED", True))
+    if chat_tool_loop():
+        chat_running = f"LLM ({getattr(s, 'QA_MODEL', '')}) with verify_claim tool"
+        chat_detail = "The model decides when a message needs a new check, then writes the reply."
+    elif chat_on and llm_ok:
+        qa_model = {"nvidia": getattr(s, "NVIDIA_QA_MODEL", ""), "openai": "gpt-4o-mini"}.get(
+            s.LLM_PROVIDER, getattr(s, "QA_MODEL", ""))
+        chat_running = f"LLM-written answers ({qa_model}); rules decide when to run a new check"
+        chat_detail = ("Answers about the findings are written by the model. Whether a message "
+                       "needs a new check is decided by rules, because the verify_claim tool "
+                       "loop needs Anthropic.")
+    else:
+        chat_running = "rule-based"
+        chat_detail = "Replies are templates that quote this chat's evidence."
     stages.append(_stage(
-        "chat_replies", llm_ok and getattr(s, "QA_ENABLED", True),
-        f"LLM ({getattr(s, 'QA_MODEL', '')}) with verify_claim tool" if llm_ok else "rule-based",
-        "", "Set ANTHROPIC_API_KEY."))
+        "chat_replies", chat_tool_loop(), chat_running, chat_detail,
+        "Set LLM_PROVIDER=anthropic and ANTHROPIC_API_KEY (and QA_ENABLED=true)."))
 
     # 11. Independent LLM fact-check, blended into the final verdict
+    from paper_trail_core.agents.llm_judge import judge_configured, judge_model, judge_provider
     judge_on = bool(getattr(s, "LLM_JUDGE", False))
+    judge_ok = judge_configured()
+    jprov = judge_provider()
+    tavily_bad = "tavily" in rejected
+    search = ("web search" if jprov == "anthropic" else
+              "Google News headlines (Tavily key rejected)" if s.TAVILY_API_KEY and tavily_bad else
+              "Tavily search" if s.TAVILY_API_KEY else "Google News headlines")
     stages.append(_stage(
-        "llm_judge", judge_on and llm_ok,
-        (f"{getattr(s, 'LLM_JUDGE_MODEL', '')} with "
-         f"{'web search' if getattr(s, 'LLM_JUDGE_WEB_SEARCH', True) else 'no web search'}, "
+        "llm_judge", judge_on and judge_ok and not (jprov != "anthropic" and tavily_bad),
+        (f"{judge_model()} ({jprov}) with "
+         f"{search if getattr(s, 'LLM_JUDGE_WEB_SEARCH', True) else 'no web search'}, "
          f"weight {getattr(s, 'LLM_JUDGE_WEIGHT', 0.6):.2f}") if judge_on else "off",
         ("Runs concurrently with the pipeline; the final verdict blends both and abstains when "
-         "they disagree." if judge_on and llm_ok else
+         "they disagree." if judge_on and judge_ok else
          "The final verdict comes from the evidence pipeline alone."),
-        "Set LLM_JUDGE=true and ANTHROPIC_API_KEY."))
+        "Replace TAVILY_API_KEY in .env and restart the server (headlines alone ground the check weakly)."
+        if judge_on and judge_ok else
+        f"Set LLM_JUDGE=true and {'NVIDIA_API_KEY' if jprov == 'nvidia' else 'ANTHROPIC_API_KEY'}."))
 
     full = all(st["full_accuracy"] for st in stages)
     return {

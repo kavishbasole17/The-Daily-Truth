@@ -97,10 +97,23 @@ def build_label_index(id2label: dict) -> dict[str, int]:
 
 
 def _resolve_device() -> str:
-    if _DEVICE_PREF in ("cuda", "cpu"):
+    """
+    cuda, then Apple's GPU (mps), then cpu.
+
+    mps matters on a Mac: the CPU path runs on one thread (see get_nli), which
+    measured 944 ms per pair on an M2 against 67 ms on mps, with the same
+    probabilities to 1e-4. At CPU speed an article's worth of pairs overran
+    the verifier's stage budget and every verdict came back "uncertain".
+    """
+    if _DEVICE_PREF in ("cuda", "cpu", "mps"):
         return _DEVICE_PREF
     import torch
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        return "cuda"
+    mps = getattr(torch.backends, "mps", None)
+    if mps is not None and mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def get_nli():
@@ -140,6 +153,20 @@ def get_nli():
             model = AutoModelForSequenceClassification.from_pretrained(_MODEL_NAME)
         model.to(device)
         model.eval()
+
+        if device == "mps":
+            # Not every operator has an mps kernel on every torch build. Prove
+            # one forward pass works here, or run on the CPU: slower, but the
+            # same model and the same numbers, rather than no NLI at all.
+            try:
+                probe = tokenizer(["The sky is blue."], ["The sky is blue."],
+                                  return_tensors="pt").to(device)
+                with torch.inference_mode():
+                    model(**probe).logits.float().cpu()
+            except Exception as exc:
+                log.warning("nli: mps is unusable for this model (%s); using cpu", exc)
+                device = "cpu"
+                model.to(device)
 
         label_index = build_label_index(model.config.id2label)
         log.info("nli: ready — label_index=%s", label_index)

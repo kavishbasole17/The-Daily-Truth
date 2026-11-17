@@ -276,7 +276,7 @@ function AnswerView({ answer, anchorPrefix, signedIn, onDiscuss }) {
             )}
             {(answer.mode === "extractive" || answer.mode === "heuristic") && (
                 <p className="muted chat-answer-note">
-                    Basic reply mode: no AI model is configured, so replies are assembled from this chat&rsquo;s evidence.
+                    Basic reply mode: this reply was assembled from this chat&rsquo;s evidence rather than written by an AI model.
                 </p>
             )}
         </>
@@ -607,7 +607,7 @@ export default function VerifyPage() {
                 .catch(err => viewTokenRef.current === token &&
                     updateAssistant(m.id, { status: "error", error: errorMessage(err, "Couldn't reply.") }));
         });
-        msgs.filter(m => m.role === "assistant" && m.status === "loading").forEach(m => {
+        msgs.filter(m => m.role === "assistant" && m.kind !== "answer" && m.status === "loading").forEach(m => {
             pollVerification(m.articleId, {
                 onStage: stage => viewTokenRef.current === token && updateAssistant(m.id, { stage }),
             })

@@ -428,15 +428,16 @@ def _apply_judge(vr: VerdictResult, handle: _JudgeHandle | None, text: str) -> V
         return vr
     import time
 
-    from paper_trail_core.nlp.llm import llm_configured
+    from paper_trail_core.agents.llm_judge import judge_configured, judge_provider
 
     new_degradations: list[Degradation] = []
     judge: dict | None = None
 
-    if not llm_configured():
+    if not judge_configured():
+        key_name = "NVIDIA_API_KEY" if judge_provider() == "nvidia" else "ANTHROPIC_API_KEY"
         new_degradations += degrade(
             "llm_judge", "llm_judge_not_configured",
-            "The independent LLM fact-check did not run because no ANTHROPIC_API_KEY is "
+            f"The independent LLM fact-check did not run because no {key_name} is "
             "set; the verdict comes from the evidence pipeline alone.",
         )
     elif handle is None:

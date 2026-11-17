@@ -413,9 +413,20 @@ export default function VerdictReport({ result, anchorPrefix, showText = false, 
                                         <div className="claim-item-header">
                                             <span className={cvMeta.className}>{cvMeta.label}</span>
                                             <span className="claim-item-header-right">
-                                                <span className="claim-confidence">
-                                                    {Math.round(cv.confidence * 100)}% confidence
-                                                </span>
+                                                {/* For "no clear signal" the server's confidence is
+                                                    1 - strongest evidence, i.e. how sure it is there
+                                                    is *no* signal; showing that as "confidence" read
+                                                    as confidence in the claim. Show the signal itself. */}
+                                                {cv.verdict === "entailment" || cv.verdict === "contradiction" ? (
+                                                    <span className="claim-confidence">
+                                                        {Math.round(cv.confidence * 100)}% confidence
+                                                    </span>
+                                                ) : cv.verdict === "neutral" ? (
+                                                    <span className="claim-confidence"
+                                                        title="How strongly the best evidence supported or contradicted this claim. Below 20% counts as no clear signal.">
+                                                        evidence signal {Math.round(Math.max(cv.entail_mass ?? 0, cv.contradict_mass ?? 0) * 100)}%
+                                                    </span>
+                                                ) : null}
                                                 {onDiscuss && <DiscussButton onClick={() => onDiscuss(i)} />}
                                             </span>
                                         </div>

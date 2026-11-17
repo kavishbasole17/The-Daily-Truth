@@ -14,6 +14,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from api.auth import (
@@ -139,7 +140,12 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)) -> TokenRespon
         auth_provider="local",
     )
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two sign-ups for the same name/email raced past the checks above.
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="That username or email is already registered.")
     db.refresh(user)
     log.info("auth: registered %s", user.username)
     return _token_response(user)

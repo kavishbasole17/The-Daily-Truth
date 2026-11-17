@@ -11,8 +11,11 @@ implicit in the environment.
 """
 from __future__ import annotations
 
+import contextlib
 import os
+import shutil
 import sys
+import tempfile
 
 import pytest
 
@@ -21,6 +24,23 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+
+# The suite must never touch the real database. config.py reads DATABASE_URL
+# when it is first imported (an environment variable beats .env), and
+# api/database.py builds its engine from that at import, so this has to be set
+# here, before any test module imports either. Patching os.environ later, in a
+# fixture, is too late: the tests then ran against the developer's
+# paper_trail.db, leaving hundreds of test accounts in it and clearing its
+# guest-usage table on every run.
+_TEST_DB_DIR = tempfile.mkdtemp(prefix="paper_trail_tests_")
+os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(_TEST_DB_DIR, 'test.db')}"
+
+
+def pytest_sessionfinish(session, exitstatus):
+    with contextlib.suppress(Exception):   # nothing imported the API: no engine to close
+        from api.database import engine
+        engine.dispose()
+    shutil.rmtree(_TEST_DB_DIR, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
@@ -85,6 +105,24 @@ def _no_llm_judge(monkeypatch):
     from config import settings
 
     monkeypatch.setattr(settings, "LLM_JUDGE", False, raising=False)
+    # The judge tests stub the Anthropic call; a local .env with
+    # LLM_PROVIDER=nvidia must not turn them into live network calls.
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "anthropic", raising=False)
+    monkeypatch.setattr(settings, "LLM_JUDGE_PROVIDER", "", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _forget_rejected_keys():
+    """
+    The retriever remembers, for the life of the process, any provider that
+    rejected its API key. Clear that around every test so one test's simulated
+    401 cannot switch a provider off for the tests that follow.
+    """
+    from paper_trail_core.agents import evidence_retriever as er
+
+    er._rejected_keys.clear()
+    yield
+    er._rejected_keys.clear()
 
 
 @pytest.fixture

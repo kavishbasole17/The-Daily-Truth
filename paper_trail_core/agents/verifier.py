@@ -114,6 +114,36 @@ def _is_news_source(snip: dict) -> bool:
         snip.get("domain", "")).endswith("wikipedia.org")
 
 
+# Providers whose snippets are a headline and nothing else.
+_HEADLINE_PROVIDERS = frozenset({"gnews_rss"})
+
+
+def _is_headline_only(snip: dict) -> bool:
+    """
+    A bare news headline, known from the provider rather than guessed from
+    length: short reference snippets ("Blue Nile: ...") must keep refuting.
+    NewsAPI items are "title. description", so one with no description is a
+    headline too.
+    """
+    provider = snip.get("provider")
+    if provider in _HEADLINE_PROVIDERS:
+        return True
+    return provider == "newsapi" and (snip.get("text") or "").strip().count(". ") == 0
+
+
+def _headline_may_refute(claim: str, snip: dict) -> bool:
+    """
+    A headline reports *an* event on the story, so NLI reads any other event
+    in it as contradiction ("SpaceX launches Starship Flight 15" vs "SpaceX
+    caught Starship"; measured 0.93). It may refute only when it is about
+    this exact claim (a near-paraphrase) or says outright that it is false.
+    """
+    if float(snip.get("relevance", 0.0)) >= PARAPHRASE_RELEVANCE:
+        return True
+    text = (snip.get("text") or "").lower()
+    return any(m in text for m in _NEGATION_MARKERS)
+
+
 # How much a detected numeric conflict may add to contradiction probability.
 # Deliberately partial: the NLI model already catches most numeric
 # contradictions on its own, and a figure that differs may be a revision or a
@@ -243,6 +273,8 @@ def aggregate_claim(
                 or _is_news_source(snip)
                 or _is_time_bound(claim)
             )
+        elif _is_headline_only(snip) and not _headline_may_refute(claim, snip):
+            cannot_refute = True
         if cannot_refute:
             p_con = 0.0
 

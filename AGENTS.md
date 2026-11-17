@@ -10,10 +10,10 @@ how to back it out. If something broke after that date, start with the **Backtra
 
 | Task | Command (from the repo root unless noted) |
 |---|---|
-| Backend tests | `pytest` (427 tests, all offline: network and models are stubbed) |
+| Backend tests | `pytest` (450 tests, all offline: network and models are stubbed; uses a temp database, never `paper_trail.db`) |
 | Python lint | `ruff check .` (config in `pyproject.toml`; must say *All checks passed!*) |
 | Frontend lint | `cd frontend && npx next lint` (config in `frontend/.eslintrc.json`) |
-| Frontend build | `cd frontend && npx next build` |
+| Frontend build | `cd frontend && npx next build` (**not while `npm run dev` is running**: use `NEXT_DIST_DIR=.next-check npx next build`) |
 | Run the API | `uvicorn api.main:app --reload` |
 | Run the UI | `cd frontend && npm run dev` |
 | Is every stage at full accuracy? | `GET http://localhost:8000/health/accuracy?deep=true` |
@@ -33,7 +33,7 @@ Rules of thumb:
 | `439030d` *added auth and chat history* | Part 1 below |
 | `ffc2b02` *feature: links can now be sent…* | Parts 2, 3 and 4 below |
 | `dc944cc` *lint issues and minor bugs fixed* | Part 5 below (lint + bug fixes) |
-| *uncommitted at time of writing* | Parts 6 and 7 below (accuracy bug fixes + LLM judge, 2026-11-16) |
+| *uncommitted at time of writing* | Parts 8 and 9 below (NVIDIA provider; pre-review audit, 2026-11-17) |
 | *not in git* (`.env` is ignored) | `.env` edits listed in Part 4 |
 
 To see exactly what a part changed: `git show <commit> -- <file>`.
@@ -213,6 +213,62 @@ For full accuracy set `CLAIM_BACKEND=llm`, `LLM_MODEL=claude-opus-5-5` and a rea
 
 ---
 
+## Part 8 — NVIDIA provider, headline evidence, placeholder keys (2026-11-17, uncommitted)
+
+| # | Change | Files | Why |
+|---|---|---|---|
+| 1 | `LLM_PROVIDER=nvidia` (OpenAI-compatible `integrate.api.nvidia.com`): claim extraction + translation on `NVIDIA_LLM_MODEL` (`nvidia/nemotron-3-ultra-550b-a55b`), Q&A on `NVIDIA_QA_MODEL` (`deepseek-ai/deepseek-v4.1-flash`). Strips `<think>` blocks, rejects truncation. | `config.py`, `paper_trail_core/nlp/llm.py`, `api/qa.py`, `api/accuracy.py`, `.env.example` | Free NVIDIA key. Chat's tool loop still needs Anthropic (rule-based fallback otherwise). |
+| 2 | LLM judge on NVIDIA: model writes queries → Tavily (or keyless Google News RSS) → model judges against the results. No sources → confidence capped at 0.3. | `paper_trail_core/agents/llm_judge.py` | NVIDIA models have no server-side web search. Measured: without sources Nemotron called a real Nov-2026 event fake at 0.90 confidence from stale training data. |
+| 2b | `LLM_JUDGE_PROVIDER` (`nvidia` \| `anthropic` \| empty = follow `LLM_PROVIDER`) and `NVIDIA_JUDGE_MODEL`; the judge checks its *own* provider's key (`judge_configured()`), and `/health/accuracy` names the judge model, provider and search source. | `config.py`, `llm_judge.py`, `pipeline.py`, `api/accuracy.py` | The judge can run on NVIDIA regardless of what extraction uses. |
+| 3 | A **headline-only** snippet (`gnews_rss`, or NewsAPI with no description) may only *refute* when it is a near-paraphrase (relevance ≥ 0.80) or carries a debunk marker. It can still support. | `paper_trail_core/agents/verifier.py` | NLI read "SpaceX launches Starship Flight 15" as contradicting "SpaceX caught Starship" (0.93). Claim mode already had this rule for news. |
+| 4 | "Earth", "Moon", "Mars", … are not places; a gazetteer match after "Gulf of / Bay of / Sea of …" is the water, not the country. | `paper_trail_core/agents/locator.py` | "around Earth" → Earth, Texas; "Gulf of Mexico" → Mexico. |
+| 5 | Placeholder API keys (`...`, `tvly-...`) are treated as unset at settings load. | `config.py` (`drop_placeholder_keys`) | They passed truthiness checks: SerpAPI and Google Fact Check were called and 401'd on every query ("Fact-check lookup failed"). |
+| 6 | "No clear signal" claims show *evidence signal N%*, not "N% confidence". | `frontend/src/components/VerdictReport.jsx` | The number was 1 − evidence strength, which read as confidence in the claim. |
+| 7 | Eval cache key includes `LLM_PROVIDER` and the NVIDIA models. Test suite pins `LLM_PROVIDER=anthropic`. | `scripts/evaluate_pipeline.py`, `tests/conftest.py` | A provider switch silently reused cached results; tests made live NVIDIA calls. |
+
+**Evaluation (#3, golden slice, heuristic claims, judge off, same cached evidence):** g08 (real)
+0.750 → 0.852 (false contradiction 0.41 removed); g16 (fake) 0.813 → 0.808; g03 (real) 0.789 → 0.778;
+others unchanged. g16 is committed as *real* under both rules: new evidence coverage, not #3, moved it,
+which suggests the fusion model reads coverage as a "real" signal. Retrain fusion once the search
+provider settles. Reports: `results/eval_golden_before.md`, `results/eval_golden_after.md`.
+Tests: `tests/test_headline_evidence.py`.
+
+---
+
+## Part 9 — Pre-review audit (2026-11-17, uncommitted)
+
+**Why:** a full pass for errors before the final review: tests, lint, build, a read of the API and
+the chat page, and a live run in the browser. Regression tests are at the end of `tests/test_api.py`.
+
+| # | Bug | Fix | Files |
+|---|---|---|---|
+| 1 | **The test suite ran against the real `paper_trail.db`.** `tests/test_api.py` patched `DATABASE_URL` in a fixture, after `config.py` and the engine had already been built from `.env`. Every run added test accounts to the dev database (339 by the time this was found) and emptied its `guest_usage` table. | `tests/conftest.py` sets `DATABASE_URL` to a temp file at import, before anything imports `config`; removed at session end. The junk rows already in `paper_trail.db` were **not** deleted (see below). | `tests/conftest.py` |
+| 2 | A check or chat reply cut off by a server restart stayed `processing` forever; the UI polled it for 10 minutes. | `_fail_interrupted_jobs()` at startup marks them failed with a reason. Assumes one API process. | `api/main.py` |
+| 3 | Reopening a chat while a reply was being written turned that reply into "Failed to verify": the resume code polled it a second time as if it were a check (`GET /articles/undefined` → 422). | The check poller skips answers. | `frontend/src/app/verify/page.jsx` |
+| 4 | One dropped connection during polling showed a healthy check as failed. | A poll with no HTTP response is retried (up to 4 in a row); HTTP errors still fail at once. | `frontend/src/services/api.js` |
+| 5 | `/predict`, `/predict/all`, `/predict/batch` and `/results` were `async def` around blocking model inference, so one consensus run froze every other request (including verification polls) until it finished. | Plain `def`: FastAPI runs them in its thread pool. | `api/main.py` |
+| 6 | With `LLM_PROVIDER=nvidia` (the local setup) every chat reply was a rule-based template, although a model was configured. | The rules still decide whether a message needs a new check (the tool loop is Anthropic-only), but answers about the findings are written by the configured model via `api/qa.py` (`mode = "llm"`); the template is the fallback. | `api/chat.py` |
+| 7 | `/health/accuracy` reported chat as "LLM (QA_MODEL) with verify_claim tool" and full accuracy whenever any LLM key was set, including when the tool loop could not run. | The stage reports what `api/chat.py` will really do. With NVIDIA it is now (correctly) below full. | `api/accuracy.py` |
+| 8 | A chat reply can run two full checks (minutes each with the LLM judge), but the UI gave up after 5 minutes and the server let a second reply start after 5. | UI waits 12 minutes; the stale-reply window is 15 (`STALE_REPLY_MINUTES`). Restart recovery is #2. | `frontend/src/services/api.js`, `api/routers/conversations.py` |
+| 9 | Two sign-ups racing for one username/email gave a 500. | `IntegrityError` → 409. | `api/routers/auth.py` |
+| 10 | The link fetcher's SSRF guard let shared address space through (`100.64.0.0/10`: not "private", not "reserved"). | Addresses must be `is_global`. | `api/url_fetch.py` |
+| 11 | React hydration warning on every page (`data-theme` is set by an inline script before hydration). | `suppressHydrationWarning` on `<html>`. | `frontend/src/app/layout.jsx` |
+| 12 | `next build` while `next dev` is running corrupts `.next` (pages lose CSS/JS until dev restarts). This happened during this audit. | `NEXT_DIST_DIR` selects another build directory: `NEXT_DIST_DIR=.next-check npx next build`. | `frontend/next.config.js`, `.gitignore`, `frontend/.dockerignore` |
+| 13 | **NLI ran on one CPU thread on Apple Silicon** (`auto` meant cuda-or-cpu): 944 ms per pair on an M2. An article's worth of pairs overran the verifier's 90 s budget, the stage was abandoned, and the verdict was `uncertain` (seen live on a two-claim Eiffel Tower check). | `auto` now picks cuda, then `mps`, then cpu; `NLI_DEVICE=mps` is accepted. Measured 67 ms per pair, probabilities equal to the CPU's within 1e-4. A one-pair self-test falls back to CPU if mps cannot run the model. | `paper_trail_core/nlp/nli.py`, `config.py`, `.env.example` |
+| 14 | **A search key that is set but wrong was treated as working.** Live, both `NEWS_API_KEY` and `TAVILY_API_KEY` were answered 401. Each query still made (and retried) the failing call, the verdict carried no degradation (Wikipedia covered for it: a silent fallback), and `/health/accuracy` stayed green. | A 401/403 marks the provider rejected for the process: no retry, no further calls, a `provider_key_rejected` degradation on every verdict, and `/health/accuracy` shows `KEY REJECTED` with the env var to fix. | `paper_trail_core/agents/evidence_retriever.py`, `api/accuracy.py` |
+| 15 | **The NewsAPI key was written to the server log.** It was sent as `?apiKey=`, and `requests` puts the full URL in its error text, which was logged. | Sent as the `X-Api-Key` header; anything logged from a provider failure goes through `redact()`. | `evidence_retriever.py` |
+| 16 | With a rejected Tavily key the NVIDIA judge got no search results, was capped to 0.30 confidence and never counted (the blend needs 0.60). The independent check was effectively off, silently. | `_web_search` falls back to Google News headlines when Tavily returns nothing, and stops calling Tavily after the first rejection. | `paper_trail_core/agents/llm_judge.py` |
+
+Tests for 13–16: `tests/test_provider_keys.py`.
+
+**Found, not changed (needs a decision):**
+- **`NEWS_API_KEY` and `TAVILY_API_KEY` in the local `.env` are rejected by their providers (401).** Until they are replaced, evidence comes from Wikipedia and Google News headlines only and the judge is grounded in headlines. Because the NewsAPI key appeared in server logs before #15, treat it as exposed if those logs were shared.
+- **Every file in `models/` is modified and uncommitted** (retrained 2026-11-16 23:38; `models/registry.json` metrics differ in the 3rd decimal). They load cleanly and `/health/accuracy` is green, but the fusion model was calibrated on the committed ones, and the "never retrain as a side effect" rule above says this should be deliberate. Either commit them on purpose (then re-run `scripts/evaluate_pipeline.py --slice golden`) or `git restore models/`.
+- `paper_trail.db` still holds the test accounts from #1. They are invisible to real users (each owns its own chats) but can be removed.
+- `guest_key` trusts `X-Forwarded-For`, so the free-check limit can be bypassed by sending that header. Fine for a demo; behind a real proxy, only trust the header from the proxy.
+
+---
+
 ## Backtracking
 
 **Symptom → most likely cause**
@@ -233,7 +289,12 @@ For full accuracy set `CLAIM_BACKEND=llm`, `LLM_MODEL=claude-opus-5-5` and a rea
 | Can't read an article by id | Part 1: saved checks are owner-only; send the owner's token. |
 | "no such column" errors | Part 1/3: `ensure_columns()` in `api/database.py` (SQLite only; other databases need a migration). |
 | Share preview image 500s | Part 2: edge runtime in `frontend/src/app/v/[slug]/opengraph-image.jsx`; `API_INTERNAL_URL` must be reachable from the Next server. |
-| Chat reply stuck "Thinking…" | Part 3: `_run_chat_job` failed; see the server log. Stale replies unblock after 5 minutes. |
+| Chat reply stuck "Thinking…" | Part 3: `_run_chat_job` failed; see the server log. A restart fails it at once (Part 9 #2); otherwise it unblocks after 15 minutes. |
+| `provider_key_rejected` in limitations / `KEY REJECTED` in `/health/accuracy` | Part 9 #14: the named key in `.env` is wrong or expired. Replace it and restart the server. |
+| Verifier stage timed out on a Mac | Part 9 #13: check the startup log says `nli: loading … on mps`; `NLI_DEVICE=cpu` forces the slow path. |
+| A check shows "The server restarted before this check finished" | Part 9 #2: working as intended; run it again. |
+| Pages suddenly unstyled in dev, 404s for `/_next/static/...` | Part 9 #12: something ran `next build` next to `next dev`. Restart `npm run dev`. |
+| Chat replies say "Basic reply mode" | Part 9 #6: no model wrote the reply (no key, or the call failed; see the server log). |
 | Lint failing after a pull | `ruff check .` / `npx next lint`; config in `pyproject.toml` and `frontend/.eslintrc.json`. |
 
 **Reverting a part**

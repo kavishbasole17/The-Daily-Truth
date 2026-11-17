@@ -801,3 +801,77 @@ def test_llm_tool_loop_runs_verify_and_cites_new_evidence(client, monkeypatch):
     tool_result = calls[1]["messages"][-1]["content"][0]
     assert tool_result["type"] == "tool_result" and tool_result["tool_use_id"] == "tu1"
     assert '"overall_verdict": "likely misinformation"' in tool_result["content"]
+
+
+# ── Regressions, 2026-11-17 ────────────────────────────────────────────────────
+
+def test_the_suite_does_not_use_the_real_database():
+    from api.database import engine
+    assert "paper_trail_tests_" in str(engine.url)
+
+
+def test_interrupted_jobs_are_failed_at_startup(client):
+    """A check or reply cut off by a restart must not stay 'processing' forever."""
+    from api.database import SessionLocal
+    from api.main import _fail_interrupted_jobs
+    from api.orm import Article, ChatQuestion
+
+    user, conv_id, _ = _chat_setup(client, "restarted")
+    db = SessionLocal()
+    try:
+        stuck = Article(text="A check the last run never finished.", status="processing",
+                        stage="verifying", kind="text")
+        reply = ChatQuestion(conversation_id=conv_id, question="why?", answer="",
+                             status="thinking", stage="thinking")
+        db.add_all([stuck, reply])
+        db.commit()
+        stuck_id, reply_id = stuck.id, reply.id
+    finally:
+        db.close()
+
+    _fail_interrupted_jobs()
+
+    body = client.get(f"/articles/{stuck_id}").json()
+    assert body["status"] == "failed" and "restarted" in body["error"]
+    msg = client.get(f"/conversations/{conv_id}/messages/{reply_id}", headers=user).json()
+    assert msg["status"] == "failed" and "restarted" in msg["error"]
+    # ...and the dead reply no longer blocks the chat
+    with _no_llm():
+        assert client.post(f"/conversations/{conv_id}/messages", json={"message": "hi"},
+                           headers=user).status_code == 202
+
+
+def test_chat_answer_is_written_by_a_non_anthropic_model(client, monkeypatch):
+    """LLM_PROVIDER=nvidia cannot run the tool loop, but its model still writes the answer."""
+    from config import settings
+    user, conv_id, _ = _chat_setup(client, "nvchat")
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "nvidia")
+    monkeypatch.setattr(settings, "NVIDIA_API_KEY", "nvapi-test")
+    asked = {}
+
+    def fake(question, ctx, history):
+        asked["question"] = question
+        return "The evidence places the tower in Paris [1]."
+
+    with patch("api.qa._ask_nvidia", side_effect=fake):
+        sent = client.post(f"/conversations/{conv_id}/messages",
+                           json={"message": "Which source is the most reliable here?"},
+                           headers=user).json()
+    reply = client.get(f"/conversations/{conv_id}/messages/{sent['id']}", headers=user).json()
+    assert reply["status"] == "done" and reply["mode"] == "llm"
+    assert reply["answer"].endswith("[1].") and [c["n"] for c in reply["citations"]] == [1]
+    assert "most reliable" in asked["question"]
+
+    # a failing model falls back to the evidence template instead of failing the reply
+    with patch("api.qa._ask_nvidia", side_effect=RuntimeError("boom")):
+        sent = client.post(f"/conversations/{conv_id}/messages",
+                           json={"message": "Which source says where it is?"}, headers=user).json()
+    reply = client.get(f"/conversations/{conv_id}/messages/{sent['id']}", headers=user).json()
+    assert reply["status"] == "done" and reply["mode"] == "heuristic"
+
+
+def test_url_guard_blocks_shared_address_space():
+    from api.url_fetch import _is_public_ip
+    assert not _is_public_ip("100.64.0.1")          # carrier-grade NAT / cloud-internal
+    assert not _is_public_ip("::ffff:10.0.0.1")     # IPv4-mapped private
+    assert _is_public_ip("93.184.216.34")

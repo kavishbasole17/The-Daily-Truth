@@ -32,6 +32,8 @@ from api.routers.articles import ArticleOut, _build_article_out, _chat_title
 
 router = APIRouter(prefix="/conversations", tags=["Chat history"])
 
+STALE_REPLY_MINUTES = 15
+
 
 class ConversationSummary(BaseModel):
     id: int
@@ -392,10 +394,12 @@ def send_message(
         target = db.get(Article, req.focus.article_id)
         if target is None or target.conversation_id != conv.id:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="That finding isn't in this chat.")
-    # One reply at a time. A reply stuck for 5+ minutes (e.g. the server
-    # restarted mid-job) no longer blocks the chat.
+    # One reply at a time. Replies cut off by a restart are failed at startup
+    # (api/main.py); this window is the backstop for a job that died some other
+    # way. It must outlast a legitimate reply, which can run two full checks
+    # (each with its own LLM fact-check), or a second job would start alongside.
     # created_at is stored as naive UTC (SQLite CURRENT_TIMESTAMP), so compare naive UTC.
-    stale_before = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=5)
+    stale_before = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=STALE_REPLY_MINUTES)
     if any(q.status in ("pending", "thinking") and q.created_at and q.created_at > stale_before
            for q in conv.questions):
         raise HTTPException(status.HTTP_409_CONFLICT,

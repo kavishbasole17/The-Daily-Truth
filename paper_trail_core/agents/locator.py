@@ -108,6 +108,13 @@ _SITE_WORDS_RE = re.compile(
 _NAME_PREFIXES = frozenset(["new", "north", "south", "east", "west", "northern", "southern", "eastern", "western", "central", "upper", "lower", "greater", "great", "old", "saint", "st", "san", "los", "las"])
 _ORG_SUFFIX = frozenset(["ltd", "inc", "corp", "party", "bank", "ministry", "council", "committee", "commission", "association", "agency", "authority", "board"])
 _HONORIFICS = frozenset(["mr", "mrs", "ms", "dr", "shri", "smt", "prof", "sir", "madam", "hon"])
+# Not places on Earth, though geocoders know towns by these names ("Earth, Texas").
+_NOT_GEOGRAPHIC = frozenset(["earth", "moon", "mars", "venus", "jupiter", "saturn", "mercury",
+                             "sun", "space", "orbit", "world", "globe", "planet"])
+# "the Gulf of Mexico" is a body of water, not the country.
+_WATER_PREFIX_RE = re.compile(
+    r"\b(?:gulf|bay|sea|strait|straits|ocean|channel|lake|river|sound|bight)\s+of\s+(?:the\s+)?$",
+    re.IGNORECASE)
 _SPEECH_VERBS = frozenset(["said", "says", "told", "added", "stated", "announced", "claimed", "alleged", "wrote", "tweeted", "posted"])
 
 _TLD_COUNTRY = {
@@ -218,6 +225,8 @@ def extract_candidates(text: str) -> list[Candidate]:
         prev = before.split()[-1].lower().strip(".,;:()") if before.split() else ""
         if entry.level in ("country", "state") and prev in _NAME_PREFIXES and before.endswith(" "):
             continue                   # let the full capitalised run ("New South Wales") stand
+        if _WATER_PREFIX_RE.search(before) or _norm(text[start:end]) in _NOT_GEOGRAPHIC:
+            continue
         cue = bool(_CUE_PRE_RE.search(before)) or bool(_CUE_POST_RE.match(text[end:end + 30]))
         add(text[start:end], start, cue=cue, gaz=entry)
 
@@ -233,6 +242,12 @@ def extract_candidates(text: str) -> list[Candidate]:
             continue
         if len(norm_words) == 1 and (len(norm_words[0]) < 3 or surface.isupper()):
             continue                      # acronyms (WHO, FBI) are not places
+        if len(norm_words) == 1 and norm_words[0] in _NOT_GEOGRAPHIC:
+            continue
+        raw0 = run.group(0)
+        if _WATER_PREFIX_RE.search(text[max(0, run.start() + raw0.find(words[0]) - 40):
+                                        run.start() + raw0.find(words[0])]):
+            continue                      # "Gulf of Mexico": the water, not the country
         # Cues are judged around the *trimmed* name: after "Residents of Whitefield"
         # loses its first word, "Residents of" is the cue, not part of the name.
         raw = run.group(0)

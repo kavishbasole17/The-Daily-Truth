@@ -35,6 +35,12 @@ frontend/.next/
 frontend/.env.local
 frontend/.idea/
 
+# Personal interview-prep reports (kept locally, not part of the project)
+PROJECT_REPORT_AND_INTERVIEW_PREPARATION.*
+PROJECT_INTERVIEW_QUESTIONS_AND_ANSWERS.*
+
 # OS
 .DS_Store
 Thumbs.db
+# Build output of a production-build check run next to the dev server
+frontend/.next-check/

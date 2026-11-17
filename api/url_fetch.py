@@ -51,7 +51,10 @@ def _is_public_ip(ip: str) -> bool:
     addr = ipaddress.ip_address(ip)
     if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
         addr = addr.ipv4_mapped
-    return not (
+    # is_global is the allow-list; the explicit checks stay as a second line.
+    # Without it, shared address space (100.64.0.0/10, used by cloud-internal
+    # networks) passed: it is neither "private" nor "reserved".
+    return addr.is_global and not (
         addr.is_private or addr.is_loopback or addr.is_link_local
         or addr.is_multicast or addr.is_reserved or addr.is_unspecified
     )

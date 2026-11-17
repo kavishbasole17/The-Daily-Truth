@@ -125,6 +125,10 @@ def _cache_key(text: str) -> str:
         "max_claims": settings.MAX_CLAIMS, "checkworthy": settings.CHECKWORTHY_MIN,
         "llm_judge": settings.LLM_JUDGE, "judge_weight": settings.LLM_JUDGE_WEIGHT,
         "judge_model": settings.LLM_JUDGE_MODEL, "judge_web": settings.LLM_JUDGE_WEB_SEARCH,
+        "llm_provider": settings.LLM_PROVIDER,
+        "judge_provider": settings.LLM_JUDGE_PROVIDER, "nvidia_judge": settings.NVIDIA_JUDGE_MODEL,
+        "nvidia_models": [settings.NVIDIA_LLM_MODEL, settings.NVIDIA_QA_MODEL]
+        if settings.LLM_PROVIDER == "nvidia" else None,
     }, sort_keys=True)
     return hashlib.sha256((cfg + "||" + text).encode("utf-8")).hexdigest()
 

@@ -216,6 +216,16 @@ def _ask_openai(question: str, ctx: QAContext, history: list[tuple[str, str]]) -
     return (resp.choices[0].message.content or "").strip() or None
 
 
+def _ask_nvidia(question: str, ctx: QAContext, history: list[tuple[str, str]]) -> str | None:
+    from paper_trail_core.nlp.llm import nvidia_client, nvidia_text
+
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + _history_messages(history) + [{
+        "role": "user", "content": f"<checks>\n{ctx.text}\n</checks>\n\nQuestion: {question}"}]
+    resp = nvidia_client().chat.completions.create(
+        model=settings.NVIDIA_QA_MODEL, messages=messages, max_tokens=4096, temperature=0.2)
+    return nvidia_text(resp.choices[0].message) or None
+
+
 def answer_question(question: str, checks: list[dict[str, Any]],
                     history: list[tuple[str, str]] | None = None) -> QAResult:
     ctx = build_context(checks)
@@ -229,6 +239,8 @@ def answer_question(question: str, checks: list[dict[str, Any]],
     try:
         if provider == "openai":
             answer = _ask_openai(question, ctx, history)
+        elif provider == "nvidia":
+            answer = _ask_nvidia(question, ctx, history)
         else:
             answer = _ask_anthropic(question, ctx, history)
     except Exception as exc:

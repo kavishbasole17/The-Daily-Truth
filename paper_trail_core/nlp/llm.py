@@ -37,8 +37,30 @@ def llm_configured() -> bool:
     if settings is None:
         return False
     provider = getattr(settings, "LLM_PROVIDER", "anthropic")
-    key = (settings.ANTHROPIC_API_KEY if provider == "anthropic" else settings.OPENAI_API_KEY) or ""
+    key = {"anthropic": settings.ANTHROPIC_API_KEY,
+           "nvidia": getattr(settings, "NVIDIA_API_KEY", None)}.get(provider, settings.OPENAI_API_KEY) or ""
     return bool(key) and not key.endswith("...")
+
+
+def active_model() -> str:
+    """The model claim extraction and translation actually call."""
+    if getattr(settings, "LLM_PROVIDER", "anthropic") == "nvidia":
+        return settings.NVIDIA_LLM_MODEL
+    return getattr(settings, "LLM_MODEL", "claude-opus-5-5")
+
+
+def nvidia_client():
+    from openai import OpenAI
+
+    return OpenAI(api_key=settings.NVIDIA_API_KEY, base_url=settings.NVIDIA_BASE_URL, timeout=240)
+
+
+_THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def nvidia_text(message) -> str:
+    """Reply text with any inline reasoning removed (some catalog models emit <think> blocks)."""
+    return _THINK.sub("", message.content or "").strip()
 
 
 def _parse_json(raw: str) -> dict[str, Any]:
@@ -105,5 +127,19 @@ def complete_json(prompt: str, *, max_tokens: int = 16000, effort: str = "high")
             response_format={"type": "json_object"},
         )
         return _parse_json(resp.choices[0].message.content)
+
+    if provider == "nvidia":
+        # No response_format: not every catalog model supports JSON mode, and
+        # _parse_json already tolerates fences and lead-in prose.
+        resp = nvidia_client().chat.completions.create(
+            model=settings.NVIDIA_LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+            temperature=0.1,
+        )
+        choice = resp.choices[0]
+        if choice.finish_reason == "length":
+            raise LLMError("reply truncated at max_tokens")
+        return _parse_json(nvidia_text(choice.message))
 
     raise LLMError(f"Unknown LLM provider: {provider}")

@@ -125,8 +125,8 @@ def search_factchecks(claim: str) -> tuple[list[dict[str, Any]], str]:
         return cached, "ok"
 
     backend = _cfg("EVIDENCE_BACKEND", "live")
-    key = _cfg("GOOGLE_FACTCHECK_API_KEY", None)
-    if backend != "live" or not key:
+    key = (_cfg("GOOGLE_FACTCHECK_API_KEY", None) or "").strip()
+    if backend != "live" or not key or key.endswith("..."):   # unset or the .env.example placeholder
         return [], "disabled"
 
     try:

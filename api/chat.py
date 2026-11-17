@@ -14,9 +14,12 @@ that finding, and "what's your verdict?" gets one clear call.
 Two engines:
   llm        — Claude with a `verify_claim` tool (manual tool loop, max 2 checks
                per reply). Claude decides when to check, then writes the reply.
-  heuristic  — no LLM configured: a rule-based router decides between running
-               a check (statements, "is it true that…", "verify …") and quoting
-               the most relevant evidence, and replies from a template.
+  heuristic  — no Anthropic key (the tool loop needs one): a rule-based router
+               decides between running a check (statements, "is it true that…",
+               "verify …") and answering from the evidence. With another provider
+               configured (LLM_PROVIDER=nvidia | openai) that answer is written
+               by its model (mode "llm"); with none, it is a template that
+               quotes the most relevant evidence.
 
 `verify` is injected by the caller (api/routers/conversations.py) so this
 module never touches the database.
@@ -35,6 +38,7 @@ from api.qa import (
     VERDICT_WORDS,
     Citation,
     QAContext,
+    answer_question,
     build_context,
     extractive_answer,
 )
@@ -342,9 +346,31 @@ def _verdict_sentence(cv: dict[str, Any]) -> str:
     return f"**{call}** — \"{cv.get('claim')}\" was {word} ({round((cv.get('confidence') or 0) * 100)}% confidence)."
 
 
+def _written_answer(message: str, focus: dict | None, checks: list[dict[str, Any]],
+                    history: list[dict[str, Any]]) -> ChatReply | None:
+    """
+    An answer written by the configured model from this chat's evidence
+    (api/qa.py), for providers that cannot run the tool loop above (NVIDIA,
+    OpenAI). None when no model is configured or the call fails, so the
+    caller falls back to the template reply.
+    """
+    if not settings or not getattr(settings, "QA_ENABLED", True):
+        return None
+    from paper_trail_core.nlp.llm import llm_configured
+    if not llm_configured():
+        return None
+    question = "\n\n".join(p for p in (describe_focus(focus, checks), message) if p)
+    result = answer_question(question, checks,
+                             [(h["question"], h["answer"] or "(no reply)") for h in history])
+    if result.mode != "llm":
+        return None
+    return ChatReply(result.answer, result.citations, "llm")
+
+
 def _heuristic_reply(message: str, focus: dict | None, ctx: QAContext,
                      checks: list[dict[str, Any]], verify: VerifyFn,
-                     on_stage: Callable[[str], None]) -> ChatReply:
+                     on_stage: Callable[[str], None],
+                     history: list[dict[str, Any]] | None = None) -> ChatReply:
     route, statement = route_message(message)
 
     if route == "verify":
@@ -370,6 +396,13 @@ def _heuristic_reply(message: str, focus: dict | None, ctx: QAContext,
         answer = "\n".join(lines)
         cites = _cited(answer, ctx)
         return ChatReply(answer, cites, "heuristic", ids)
+
+    # Questions about the findings: the model writes the answer when one is
+    # configured; the templates below are the no-model fallback.
+    if any(c.get("verdict") for c in checks):
+        written = _written_answer(message, focus, checks, history or [])
+        if written:
+            return written
 
     if route == "verdict":
         cv = focused_claim(focus, checks)
@@ -408,4 +441,4 @@ def chat_reply(message: str, focus: dict | None, checks: list[dict[str, Any]],
                 return reply
         except Exception as exc:
             log.warning("chat: LLM reply failed, using heuristic: %s", exc)
-    return _heuristic_reply(message, focus, ctx, checks, verify, on_stage)
+    return _heuristic_reply(message, focus, ctx, checks, verify, on_stage, history)
