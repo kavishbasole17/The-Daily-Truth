@@ -112,9 +112,9 @@ def _clamp(x: Any, default: float) -> float:
     return max(0.0, min(1.0, v))
 
 
-def extract_json(raw: str) -> dict[str, Any]:
+def extract_json(raw: str, key: str = "verdict") -> dict[str, Any]:
     """
-    The last JSON object in `raw` that has a `verdict` key.
+    The last JSON object in `raw` that has `key` (default `verdict`).
 
     The reply may carry reasoning before the object, and a greedy regex from
     the first `{` to the last `}` breaks whenever that reasoning contains a
@@ -131,11 +131,11 @@ def extract_json(raw: str) -> dict[str, Any]:
         except ValueError:
             pos = raw.find("{", pos + 1)
             continue
-        if isinstance(obj, dict) and "verdict" in obj:
+        if isinstance(obj, dict) and key in obj:
             found = obj
         pos = raw.find("{", end)
     if found is None:
-        raise LLMError("LLM judge reply contained no verdict JSON")
+        raise LLMError(f"LLM judge reply contained no {key} JSON")
     return found
 
 
@@ -328,11 +328,10 @@ def _nvidia_json(model: str, prompt: str, *, key: str = "verdict", max_tokens: i
     choice = resp.choices[0]
     if choice.finish_reason == "length":
         raise LLMError("reply truncated at max_tokens")
-    raw = nvidia_text(choice.message)
-    if key == "verdict":
-        return extract_json(raw)
-    from paper_trail_core.nlp.llm import _parse_json
-    return _parse_json(raw)
+    # Same parser for the query plan and the verdict: a greedy first-{-to-last-}
+    # match raised JSONDecodeError whenever the reply's prose held a brace, and
+    # that discarded the whole independent check.
+    return extract_json(nvidia_text(choice.message), key)
 
 
 def _tavily_hits(client: Any, query: str) -> list[dict[str, str]]:

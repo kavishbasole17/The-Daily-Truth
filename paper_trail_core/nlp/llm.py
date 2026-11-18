@@ -69,10 +69,24 @@ def _parse_json(raw: str) -> dict[str, Any]:
         return json.loads(raw)
     except ValueError:
         pass
-    m = re.search(r"\{.*\}", raw, re.DOTALL)   # tolerate ```json fences or a lead-in sentence
-    if not m:
+    # Tolerate ```json fences, a lead-in sentence, and braces in that prose: decode
+    # from each "{" and keep the last valid object. A greedy first-{-to-last-}
+    # match raised a bare JSONDecodeError whenever the prose held a brace.
+    decoder = json.JSONDecoder()
+    found: dict[str, Any] | None = None
+    pos = raw.find("{")
+    while pos != -1:
+        try:
+            obj, end = decoder.raw_decode(raw, pos)
+        except ValueError:
+            pos = raw.find("{", pos + 1)
+            continue
+        if isinstance(obj, dict):
+            found = obj
+        pos = raw.find("{", end)
+    if found is None:
         raise LLMError("LLM reply contained no JSON object")
-    return json.loads(m.group(0))
+    return found
 
 
 def _stream_anthropic(client, kwargs: dict[str, Any]):

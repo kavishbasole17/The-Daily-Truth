@@ -121,6 +121,50 @@ def test_extract_json_raises_without_a_verdict():
         J.extract_json("no json here {\"foo\": 1}")
 
 
+def _nvidia_reply(content):
+    from types import SimpleNamespace as NS
+    msg = NS(content=content, reasoning_content=None)
+    return NS(choices=[NS(message=msg, finish_reason="stop")])
+
+
+@pytest.mark.parametrize("reply", [
+    # Reasoning that mentions a brace before the object: the old greedy
+    # first-{-to-last-} parse raised JSONDecodeError on exactly this.
+    'I will search for {person} and {place}.\n{"queries": ["vijay oath telangana", "telangana chief minister"]}',
+    # Two objects: an example, then the answer.
+    'Example: {"queries": ["x"]}\nAnswer: {"queries": ["vijay oath telangana", "telangana chief minister"]}',
+    '```json\n{"queries": ["vijay oath telangana", "telangana chief minister"]}\n```',
+])
+def test_query_plan_parses_despite_braces_and_fences(monkeypatch, reply):
+    from paper_trail_core.nlp import llm
+
+    class _Client:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**_kw):
+                    return _nvidia_reply(reply)
+
+    monkeypatch.setattr(llm, "nvidia_client", lambda: _Client)
+    plan = J._nvidia_json("m", "p", key="queries", max_tokens=100)
+    assert plan["queries"] == ["vijay oath telangana", "telangana chief minister"]
+
+
+def test_query_plan_without_json_is_an_llm_error_not_a_decode_crash(monkeypatch):
+    from paper_trail_core.nlp import llm
+
+    class _Client:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**_kw):
+                    return _nvidia_reply("Sorry, I can't plan searches {for this}.")
+
+    monkeypatch.setattr(llm, "nvidia_client", lambda: _Client)
+    with pytest.raises(LLMError):
+        J._nvidia_json("m", "p", key="queries", max_tokens=100)
+
+
 def test_judgement_from_clamps_and_derives_verdict():
     j = J.judgement_from({"p_real": 1.7, "confidence": "high", "claims": [
         {"claim": "c", "assessment": "SUPPORTED", "urls": ["https://a.com", "javascript:x"]}]})
