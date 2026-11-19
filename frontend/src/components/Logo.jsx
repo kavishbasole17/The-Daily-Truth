@@ -1,6 +1,6 @@
 // src/components/Logo.jsx
 //
-// The "T." app-icon mark — sourced from creatives/Logo Options-selection (2).png.
+// The "T." app-icon mark — sourced from assets/logos/logo-option-2.png.
 // Dot is brand red today; the design spec calls for it to eventually track
 // verdict color (red/false, green/true, amber/review) as a status system.
 
