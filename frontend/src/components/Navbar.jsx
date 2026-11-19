@@ -86,6 +86,10 @@ function AccountMenu() {
 
 export default function Navbar() {
     const path = usePathname();
+    const [menuOpen, setMenuOpen] = useState(false);
+
+    // Close the mobile menu after navigating.
+    useEffect(() => { setMenuOpen(false); }, [path]);
 
     const links = [
         ["Home", "/"],
@@ -106,7 +110,7 @@ export default function Navbar() {
                     </span>
                 </Link>
 
-                <div className="nav-links">
+                <div className={`nav-links${menuOpen ? " open" : ""}`}>
                     {links.map(([name, href]) => (
                         <Link
                             key={href}
@@ -121,6 +125,12 @@ export default function Navbar() {
                 <div className="nav-actions">
                     <ThemeToggle />
                     <AccountMenu />
+                    <button
+                        type="button" className="nav-burger" aria-label="Menu"
+                        aria-expanded={menuOpen} onClick={() => setMenuOpen(o => !o)}
+                    >
+                        <span /><span /><span />
+                    </button>
                 </div>
             </div>
         </nav>

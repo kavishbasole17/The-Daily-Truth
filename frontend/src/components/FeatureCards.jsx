@@ -4,6 +4,14 @@ import "@/styles/landing.css";
 
 const features = [
     {
+        title: "Paper Trail",
+        text: "Check a claim, article or link against live news, with the evidence shown.",
+        href: "/verify",
+        icon: (
+            <path d="M9 12h6m-6 4h6M7 3h7l5 5v13H7a2 2 0 01-2-2V5a2 2 0 012-2z" />
+        )
+    },
+    {
         title: "Single Verification",
         text: "Analyze one article instantly using a selected model.",
         href: "/single",
